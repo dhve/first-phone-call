@@ -1,8 +1,6 @@
-agentcards.host39.org {
-  # API, auth, and card management routes → backend
-  handle /api/* {
-    reverse_proxy server:3010
-  }
+# host39.org — dashboard and API (same origin = no CORS issues)
+host39.org {
+  # Auth + card management API → backend
   handle /auth/* {
     reverse_proxy server:3010
   }
@@ -13,18 +11,26 @@ agentcards.host39.org {
     reverse_proxy server:3010
   }
 
-  # Personal agent card routes → backend
+  # Everything else → Next.js frontend
+  handle {
+    reverse_proxy web:3002
+  }
+}
+
+# agentcards.host39.org — public card JSON serving only
+agentcards.host39.org {
+  # Personal agent cards: /personal/john@hotmail.com/card.json
   handle /personal/* {
     reverse_proxy server:3010
   }
 
-  # Domain-based agent card routes (/:domain/:slug.json) → backend
-  # Everything else → Next.js frontend
+  # Domain-based agent cards: /moonbakery.com/refund.json
   handle /* {
     @agentcard path_regexp ^/[a-z0-9][a-z0-9.-]*/[a-z0-9][a-z0-9-]*\.json$
     handle @agentcard {
       reverse_proxy server:3010
     }
-    reverse_proxy web:3002
+    # Non-card requests redirect to the main site
+    redir https://host39.org{uri} 301
   }
 }
