@@ -26,9 +26,9 @@ export const MOCK_INSIGHT: DebriefInsight = {
   whatTheyCareAbout:
     'They seem to care a lot about having enough runway — not just the deadline itself, but the feeling of not being rushed into something half-finished.',
   whereThereIsAGap:
-    'You're both willing to adjust scope, but you haven't agreed yet on what gets cut. That's the gap your agents are circling.',
+    "You're both willing to adjust scope, but you haven't agreed yet on what gets cut. That's the gap your agents are circling.",
   whatAgentNeedsFromYou:
-    'Is there one thing on the list that you'd be okay removing entirely, if it meant keeping the rest on track?',
+    "Is there one thing on the list that you'd be okay removing entirely, if it meant keeping the rest on track?",
 };
 
 function InsightCard({
