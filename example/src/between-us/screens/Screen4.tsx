@@ -24,9 +24,9 @@ interface Props {
 // Placeholder verdict — replace with real agent synthesis
 export const MOCK_VERDICT: VerdictResult = {
   sharedAgreement:
-    'You'll reduce the scope by removing the reporting module from this sprint. The deadline stays, but the deliverable is smaller and better defined.',
+    "You'll reduce the scope by removing the reporting module from this sprint. The deadline stays, but the deliverable is smaller and better defined.",
   whatItMeansForYou:
-    'You have clear ownership of the core feature, with the pressure of the extra work removed. You'll have what you need to deliver something you're proud of.',
+    "You have clear ownership of the core feature, with the pressure of the extra work removed. You'll have what you need to deliver something you're proud of.",
   whatTheyGet:
     'They get a committed, focused delivery on the core feature — which is what matters most to their stakeholders right now.',
 };
