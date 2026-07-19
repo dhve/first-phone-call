@@ -14,10 +14,12 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import {
+  AUDIO_CALL_ENABLED,
   CONVERSATION_MAX_TURNS,
   MAX_CONSECUTIVE_REPEATS,
   MIN_TURNS_BEFORE_AGREEMENT,
   MODEL,
+  WHISPER,
   isEcho,
   signalsAgreement,
 } from './config';
@@ -25,9 +27,12 @@ import { isModelDownloaded } from './modelManager';
 import { discoverRelay } from './relayDiscovery';
 import { loadRelayUrl, saveRelayUrl } from './relayStore';
 import { useAgent, type UIMessage } from './useAgent';
+import { useAudioCall } from './useAudioCall';
 import { callPeerAgent, usePhoneInbox } from './usePhoneInbox';
+import { ensureWhisperContext } from './whisper';
+import { isWhisperModelDownloaded } from './whisperModel';
 
-type Mode = 'local' | 'peer' | 'auto';
+type Mode = 'local' | 'peer' | 'auto' | 'phone';
 
 /**
  * The three things this app can do, named by who answers rather than by what
@@ -69,6 +74,15 @@ const MODES: {
     placeholder: 'Give them something to settle…',
     needsPeer: true,
     tint: { backgroundColor: '#7c3aed' },
+  },
+  {
+    key: 'phone',
+    label: '📞 Phone call',
+    action: 'Dial',
+    hint: 'a spoken call: each phone plays the other out loud, hears it with whisper, and answers what it heard',
+    placeholder: 'Give them something to talk about…',
+    needsPeer: true,
+    tint: { backgroundColor: '#db2777' },
   },
 ];
 
@@ -119,6 +133,10 @@ export function DeviceAgentApp() {
    */
   const convSeqRef = useRef(0);
 
+  // Whisper loads once the LLM is up; a phone that cannot hear cannot pick up.
+  const [whisperState, setWhisperState] = useState<'off' | 'loading' | 'ready' | 'error'>('off');
+  const [autoAnswer, setAutoAnswer] = useState(true);
+
   const inbox = usePhoneInbox({
     relayUrl,
     // Keep listening even while driving a conversation. Going deaf here
@@ -128,19 +146,48 @@ export function DeviceAgentApp() {
     enabled: idle,
     answer: answerRemote,
     onEvent: (line) => appendLine('tool', line),
+    onCallItem: (item) => audioCall.onCallItem(item),
   });
+
+  const audioCall = useAudioCall({
+    relayUrl,
+    pairing: inbox.pairing,
+    enabled: status === 'ready' && whisperState === 'ready',
+    autoAnswer,
+    converseTurn,
+    resetConversation,
+    onEvent: (line) => appendLine('tool', line),
+  });
+  const inCall = audioCall.call.phase !== 'idle';
 
   const peerId = inbox.pairing?.peerId ?? null;
   const [mode, setMode] = useState<Mode>('local');
   const current = MODES.find((m) => m.key === mode) ?? MODES[0];
   const needsPeer = current.needsPeer;
-  const busy = calling || conversing || status === 'thinking';
-  const canAct = status === 'ready' && !busy && (!needsPeer || !!peerId);
+  const busy = calling || conversing || status === 'thinking' || inCall;
+  const canAct =
+    status === 'ready' &&
+    !busy &&
+    (!needsPeer || !!peerId) &&
+    (mode !== 'phone' || whisperState === 'ready');
 
   const onPrimary = () => {
     if (mode === 'local') return onSend();
     if (mode === 'peer') return void onCallPeer();
+    if (mode === 'phone') return void onDial();
     return void onTalk();
+  };
+
+  /** Start a spoken call about whatever is in the input box. */
+  const onDial = async () => {
+    const topic = input.trim();
+    if (!topic || inCall || !peerId) return;
+    setInput('');
+    try {
+      await audioCall.dial(topic);
+    } catch (e) {
+      appendLine('tool', `⚠️  could not dial: ${(e as Error).message}`);
+    }
   };
 
   useEffect(() => {
@@ -154,6 +201,33 @@ export function DeviceAgentApp() {
   useEffect(() => {
     if (status === 'idle' && isModelDownloaded()) initialize();
   }, [status, initialize]);
+
+  // Load whisper after the LLM: same deliberate-download rule for first-timers
+  // (the file is small but it is still someone's data plan), automatic when
+  // the model is already on disk.
+  useEffect(() => {
+    if (!AUDIO_CALL_ENABLED || status !== 'ready' || whisperState !== 'off') return;
+    if (!isWhisperModelDownloaded()) {
+      appendLine('tool', `👂 tap Dial once to fetch the ${WHISPER.sizeLabel} hearing model`);
+    }
+    let lastQuarter = -1;
+    setWhisperState('loading');
+    ensureWhisperContext((f) => {
+      const quarter = Math.floor(f * 4);
+      if (quarter > lastQuarter) {
+        lastQuarter = quarter;
+        appendLine('tool', `👂 downloading whisper ${Math.round(f * 100)}%`);
+      }
+    })
+      .then(() => {
+        setWhisperState('ready');
+        appendLine('tool', '👂 whisper ready — this phone can hear');
+      })
+      .catch((e) => {
+        setWhisperState('error');
+        appendLine('tool', `⚠️  whisper failed: ${(e as Error).message}`);
+      });
+  }, [status, whisperState, appendLine]);
 
   const ready = status === 'ready' || status === 'thinking';
 
@@ -374,6 +448,20 @@ export function DeviceAgentApp() {
           {inbox.lastError && (
             <Text style={styles.relayError}>relay error: {inbox.lastError}</Text>
           )}
+          <Pressable onPress={() => setAutoAnswer((v) => !v)} hitSlop={8}>
+            <Text style={styles.relayLabel}>
+              auto-answer calls: {autoAnswer ? 'on' : 'off'} · tap to toggle
+            </Text>
+          </Pressable>
+        </View>
+      )}
+
+      {inCall && (
+        <View style={styles.callBanner}>
+          <Text style={styles.callBannerText}>{callBannerLabel(audioCall.call)}</Text>
+          <Pressable style={styles.callEndBtn} onPress={() => void audioCall.hangUp('stopped')}>
+            <Text style={styles.actionText}>End</Text>
+          </Pressable>
         </View>
       )}
 
@@ -460,8 +548,54 @@ export function DeviceAgentApp() {
           </View>
         </KeyboardAvoidingView>
       )}
+
+      {audioCall.call.phase === 'ringing' && (
+        <View style={styles.ringOverlay}>
+          <Text style={styles.ringTitle}>
+            📞 {audioCall.call.peerName ?? 'The other agent'} is calling
+          </Text>
+          {audioCall.call.autoAnswerIn !== null && (
+            <Text style={styles.ringCountdown}>
+              answering in {audioCall.call.autoAnswerIn}s…
+            </Text>
+          )}
+          <View style={styles.ringButtons}>
+            <Pressable
+              style={[styles.primaryBtn, styles.answerBtn]}
+              onPress={() => void audioCall.answer()}
+            >
+              <Text style={styles.primaryText}>Answer</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.primaryBtn, styles.declineBtn]}
+              onPress={() => void audioCall.hangUp('declined')}
+            >
+              <Text style={styles.primaryText}>Decline</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
+}
+
+function callBannerLabel(call: {
+  phase: string;
+  activeState: string;
+  turnNo: number;
+}): string {
+  if (call.phase === 'dialing') return '📞 dialing…';
+  if (call.phase === 'ringing') return '🔔 incoming call';
+  switch (call.activeState) {
+    case 'listening':
+      return `📞 on a call · listening (turn ${call.turnNo})`;
+    case 'thinking':
+      return '📞 on a call · thinking';
+    case 'speaking':
+      return '📞 on a call · speaking';
+    default:
+      return '📞 on a call · waiting for the other side';
+  }
 }
 
 function Gate(props: {
@@ -568,6 +702,38 @@ function statusLabel(status: string): string {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f8fafc' },
+  callBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#db2777',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  callBannerText: { color: '#fff', fontWeight: '600', flexShrink: 1 },
+  callEndBtn: {
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  ringOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    padding: 24,
+  },
+  ringTitle: { color: '#fff', fontSize: 24, fontWeight: '700', textAlign: 'center' },
+  ringCountdown: { color: '#cbd5e1', fontSize: 16 },
+  ringButtons: { flexDirection: 'row', gap: 16, marginTop: 8 },
+  answerBtn: { backgroundColor: '#16a34a' },
+  declineBtn: { backgroundColor: '#dc2626' },
   flex: { flex: 1 },
   header: {
     paddingHorizontal: 20,

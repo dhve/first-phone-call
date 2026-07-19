@@ -1,20 +1,25 @@
 /**
  * Demo configuration: which model to download and the agent's behavior.
  *
- * Qwen3.5-0.8B (Q4_K_M, March 2026) — the successor to Qwen3-0.6B we started
- * on, in the same runnable class. The llama.cpp inside our llama.rn build
- * already knows the qwen35 architecture, so this is a config-only switch: no
- * native rebuild, just a fresh download.
+ * Qwen3.5-0.8B (Q4_K_M, March 2026) succeeds the Qwen3-0.6B this demo started
+ * on. Gemma 3 270M was tried here first and is ~240 MB lighter — real headroom
+ * next to whisper during audio calls — but it could not hold up its half of an
+ * agent-to-agent conversation: asked which of two things it preferred, it
+ * answered about accessibility and performance. The text demo is the one on
+ * stage, so it gets the model that can actually answer.
  *
- * nCtx is 2048, down from 4096, on purpose. The KV cache scales with context
- * and was costing more memory than the model itself on the 4 GB tablet that
- * kept getting OOM-killed; halving it buys back more than the +150 MB of
- * weights. Agent turns are one or two sentences — 2048 tokens fits a whole
- * conversation, and the engine trims oldest turns when it does not.
+ * If the audio call turns out to need that headroom back on a 4 GB device,
+ * this is the line to revert.
  *
- * Qwen keeps hybrid reasoning: it can emit <think>...</think> blocks before
- * its answer. Those must never reach the other agent, so replies are
- * stripped (see stripThinking) and prompts carry /no_think.
+ * nCtx is 2048, not 4096, on purpose. The KV cache scales with context and was
+ * costing more memory than the weights on the tablet that kept being
+ * OOM-killed; halving it buys back more than the heavier model costs. Turns
+ * are one or two sentences, and the engine trims oldest turns when a
+ * conversation outgrows the window.
+ *
+ * Qwen has hybrid reasoning and will emit <think> blocks unless told not to
+ * (see enableThinking where the agents are built); stripThinking is the guard
+ * for anything that slips through.
  */
 export const MODEL = {
   /** Single-file GGUF download (unsloth mirror — ungated, no HF token needed). */
@@ -27,13 +32,64 @@ export const MODEL = {
   nCtx: 2048,
 };
 
+// ---------------------------------------------------------------------------
+// Audio phone call
+// ---------------------------------------------------------------------------
+
+/** Master switch for the call UI; the text conversation flow stays either way. */
+export const AUDIO_CALL_ENABLED = true;
+
+/**
+ * When true (the demo), each agent's LLM consumes what whisper HEARD, not
+ * what the peer sent. False is the emergency fallback: audio still plays,
+ * but the model reads the exact sent text, taking STT out of the loop.
+ */
+export const CONSUME_TRANSCRIPTION = true;
+
+/**
+ * Whisper model. base.en (q5_1, ~60 MB) over tiny.en: the transcription feeds
+ * a 270M LLM that derails on garbled input, so accuracy wins over 30 MB.
+ * SHA-256 values are the Hugging Face lfs.oid for each file at
+ * https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main
+ * (fetched 2026-07-19).
+ */
+const WHISPER_MODELS = {
+  'base.en': {
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin',
+    fileName: 'ggml-base.en-q5_1.bin',
+    sizeLabel: '~57 MB',
+    sha256: '4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f',
+  },
+  'tiny.en': {
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin',
+    fileName: 'ggml-tiny.en-q5_1.bin',
+    sizeLabel: '~31 MB',
+    sha256: 'c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b',
+  },
+} as const;
+
+export const WHISPER_MODEL: keyof typeof WHISPER_MODELS = 'base.en';
+export const WHISPER = WHISPER_MODELS[WHISPER_MODEL];
+
+/** How long the callee's ring UI waits before answering by itself. */
+export const AUTO_ANSWER_MS = 3_000;
+
+/** Give up dialing if the peer has not answered by then (relay enforces too). */
+export const RING_TIMEOUT_MS = 30_000;
+
+/**
+ * A turn that produced neither audio nor an inbox follow-up in this long
+ * means the call died somewhere; hang up instead of listening forever.
+ */
+export const TURN_TIMEOUT_MS = 120_000;
+
 export const SYSTEM_PROMPT =
   'You are a helpful assistant running entirely on the user\'s device. ' +
   'You can call tools to take real actions (clipboard, files, web requests, ' +
   'notifications) or to fetch information. Prefer calling a tool when it lets ' +
   'you actually do what the user asked, rather than describing how. When a ' +
   'tool returns, summarize the outcome for the user in plain language. ' +
-  'Answer directly without showing your reasoning. /no_think';
+  'Answer directly without showing your reasoning.';
 
 /**
  * System prompt used when another AI agent calls this device (not the local
@@ -49,7 +105,7 @@ export const REMOTE_SYSTEM_PROMPT =
   'tasks. Stay in character. Answer what was actually asked. Talk the way ' +
   'people talk: short casual sentences, contractions, no markdown, no ' +
   'lists. Disagree when you see it differently. One or two sentences. Do ' +
-  'not show reasoning. /no_think';
+  'not show reasoning.';
 
 /**
  * Cap on tokens per agent-to-agent reply.
@@ -81,7 +137,7 @@ export const CONVERSATION_SYSTEM_PROMPT =
   'it differently, concede a point when they earn it, ask a question back ' +
   'now and then. Never open a message with "I agree". Only when the ' +
   'discussion has truly run its course and you both see it the same way, ' +
-  `end your message with the single word ${AGREEMENT_MARKER}. /no_think`;
+  `end your message with the single word ${AGREEMENT_MARKER}.`;
 
 /**
  * Exchanges that must happen before agreement is allowed to end the run.
