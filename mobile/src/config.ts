@@ -53,6 +53,7 @@ export const NANDA = {
     register: '/auth/register',
     login: '/auth/login',
     orgs: '/api/v1/orgs',
+    resolve: '/api/v1/resolve',
     indexRecord: (orgId: string) => `/api/v1/index/${encodeURIComponent(orgId)}`,
   },
 };

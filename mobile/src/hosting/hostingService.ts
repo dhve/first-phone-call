@@ -1,5 +1,5 @@
 import { Agent, LlamaEngine, ToolRegistry } from 'react-native-device-agent';
-import { AGENT, MIN_BATTERY_PERCENT, MODEL, buildSystemPrompt } from '../config';
+import { AGENT, MIN_BATTERY_PERCENT, MODEL, agentUrn, buildSystemPrompt } from '../config';
 import { createHostTools } from '../agent/tools';
 import {
   checkPublicResolution,
@@ -20,6 +20,7 @@ import {
   getNandaIndexRecord,
   nandaLogin,
   nandaRegisterAccount,
+  retrieveNandaAgentCard,
 } from '../api/nanda';
 import { buildNandaOrgPayload } from '../nanda/registration';
 import { buildSignableCard } from './signableCard';
@@ -90,7 +91,7 @@ export interface HostStatus {
   relay: { state: RelayUiState; error?: string };
   /** NANDA index registration for the active card. */
   nanda: { state: NandaState; orgId?: string; error?: string };
-  resolution: { state: ResolutionState };
+  resolution: { state: ResolutionState; cardUrl?: string; error?: string };
   hostingEnabled: boolean;
   busy: boolean;
   audit: AuditEntry[];
@@ -398,8 +399,25 @@ class HostingService {
       return;
     }
     this.update({ resolution: { state: 'checking' } });
-    const ok = await checkPublicResolution(email, card.slug);
-    this.update({ resolution: { state: ok ? 'resolved' : 'not-resolved' } });
+    try {
+      if (this.status.nanda.state === 'active') {
+        const retrieved = await retrieveNandaAgentCard(agentUrn(email, card.slug));
+        this.update({ resolution: { state: 'resolved', cardUrl: retrieved.cardUrl } });
+        return;
+      }
+
+      // Before NANDA activation, retain the direct hosting check so users can
+      // diagnose publication independently from index registration.
+      const ok = await checkPublicResolution(email, card.slug);
+      this.update({ resolution: { state: ok ? 'resolved' : 'not-resolved' } });
+    } catch (e) {
+      this.update({
+        resolution: {
+          state: 'not-resolved',
+          error: e instanceof Error ? e.message : 'NANDA card retrieval failed',
+        },
+      });
+    }
   }
 
   // NANDA index registration

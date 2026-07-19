@@ -228,6 +228,7 @@ export function HostingScreen({
             }
             action={{ label: 'Check', onPress: () => run(() => hostingService.checkResolution()) }}
           />
+          {status.resolution.error && <Text style={ui.errorText}>{status.resolution.error}</Text>}
           {status.busy && (
             <View style={ui.row}>
               <ActivityIndicator color={colors.primary} />
