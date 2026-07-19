@@ -10,8 +10,14 @@
  * it. It stays editable in the UI since LAN addresses move around.
  */
 
-/** Relay base URL — the dev machine on the shared network/hotspot. */
-export const DEFAULT_RELAY_URL = 'http://10.198.223.53:8787';
+/** Port the relay listens on. The host is discovered; see relayDiscovery.ts. */
+export const RELAY_PORT = 8787;
+
+/** Last-resort relay URL, used when discovery finds nothing reachable. */
+export const DEFAULT_RELAY_URL = `http://10.198.223.53:${RELAY_PORT}`;
+
+/** How long a single /health probe may take while hunting for the relay. */
+export const PROBE_TIMEOUT_MS = 1500;
 
 /** How often to poll /inbox when idle. */
 export const INBOX_POLL_MS = 1000;

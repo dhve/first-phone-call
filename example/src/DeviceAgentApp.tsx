@@ -14,6 +14,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { MODEL } from './config';
 import { isModelDownloaded } from './modelManager';
+import { discoverRelay } from './relayDiscovery';
 import { loadRelayUrl, saveRelayUrl } from './relayStore';
 import { useAgent, type UIMessage } from './useAgent';
 import { callPeerAgent, usePhoneInbox } from './usePhoneInbox';
@@ -76,6 +77,33 @@ export function DeviceAgentApp() {
   }, [status, initialize]);
 
   const ready = status === 'ready' || status === 'thinking';
+
+  // Find the relay before trusting the saved address. The dev machine's IP
+  // moves between networks, and a stale address is the failure that looks
+  // like "the whole demo is broken" when it is one wrong octet.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const found = await discoverRelay();
+      if (cancelled) return;
+
+      if (!found.reachable) {
+        appendLine('tool', `⚠️  no relay answered at: ${found.tried.join(', ')}`);
+        return;
+      }
+      if (found.url !== relayUrl) {
+        saveRelayUrl(found.url);
+        setRelayUrl(found.url);
+        setRelayDraft(found.url);
+        appendLine('tool', `🔗 found relay at ${found.url}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on mount: later changes come from discovery or a manual edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Place an outbound call to the paired agent and show its reply. */
   const onCallPeer = async () => {

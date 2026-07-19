@@ -12,6 +12,7 @@
 
 import express, { type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -331,11 +332,36 @@ app.get('/log', (_req: Request, res: Response) => {
   res.json({ events });
 });
 
+/**
+ * Every address a phone on the same network could reach this process at.
+ * Printed on boot because this machine's IP is the one thing that moves
+ * between networks, and knowing it beats guessing from another terminal.
+ */
+function lanAddresses(): string[] {
+  const found: string[] = [];
+  for (const [name, addrs] of Object.entries(networkInterfaces())) {
+    for (const addr of addrs ?? []) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        found.push(`http://${addr.address}:${PORT}  (${name})`);
+      }
+    }
+  }
+  return found;
+}
+
 app.listen(PORT, HOST, () => {
   console.log('');
   console.log(`  NANDA relay listening on http://${HOST}:${PORT}`);
   console.log(`  public url    ${PUBLIC_URL}`);
   console.log(`  agent card    ${PUBLIC_URL}/agent-card`);
   console.log(`  run timeout   ${RUN_TIMEOUT_MS / 1000}s`);
+  console.log('');
+  const lan = lanAddresses();
+  if (lan.length) {
+    console.log('  reachable from a phone at:');
+    for (const addr of lan) console.log(`    ${addr}`);
+  } else {
+    console.log('  no external network interface — a phone cannot reach this.');
+  }
   console.log('');
 });
