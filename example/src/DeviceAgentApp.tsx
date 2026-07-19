@@ -587,22 +587,25 @@ const styles = StyleSheet.create({
     paddingTop: 6,
   },
   actionBtn: {
-    borderRadius: 10,
-    paddingHorizontal: 18,
-    minWidth: 72,
+    // Matches the input's minHeight: the row aligns on flex-end, so without
+    // this the button shrinks to its label and sits shorter than the field.
+    minHeight: 44,
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    minWidth: 80,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 8,
   },
   actionText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   actionDisabled: { backgroundColor: '#cbd5e1' },
   stopBtn: {
     backgroundColor: '#dc2626',
-    borderRadius: 10,
-    paddingHorizontal: 14,
+    minHeight: 44,
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    minWidth: 80,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 8,
   },
   relayPanel: {
     backgroundColor: '#fff',

@@ -52,6 +52,14 @@ export function usePhoneInbox(options: InboxOptions) {
 
   const emit = useCallback((line: string) => onEventRef.current?.(line), []);
 
+  /**
+   * Peer we have already announced. Held in a ref, not the effect: the effect
+   * restarts whenever the relay address changes — which discovery does on
+   * launch — and a local variable would reset with it, printing "paired with…"
+   * again each time.
+   */
+  const announcedPeerRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!enabled) {
       setStatus('off');
@@ -60,7 +68,6 @@ export function usePhoneInbox(options: InboxOptions) {
 
     let cancelled = false;
     const base = relayUrl.replace(/\/+$/, '');
-    let announcedPeer: string | null = null;
 
     /** Claim a lane and learn the peer's. Returns null if the relay is down. */
     const register = async (): Promise<Pairing | null> => {
@@ -74,8 +81,8 @@ export function usePhoneInbox(options: InboxOptions) {
         const body = (await res.json()) as Pairing;
         setPairing(body);
         setLastError(null);
-        if (body.peerId && body.peerId !== announcedPeer) {
-          announcedPeer = body.peerId;
+        if (body.peerId && body.peerId !== announcedPeerRef.current) {
+          announcedPeerRef.current = body.peerId;
           emit(`🤝 paired with ${body.peerName ?? body.peerId}`);
         }
         return body;
