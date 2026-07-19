@@ -1,23 +1,30 @@
 /**
  * Demo configuration: which model to download and the agent's behavior.
  *
- * Qwen3-0.6B (Q4_K_M) is the smallest Qwen 3 — ~370 MB, loads in seconds, and
- * runs on modest hardware. Unlike Gemma 3, its chat template DOES support
- * tool calling, which the agent-to-agent flow depends on.
+ * Qwen3.5-0.8B (Q4_K_M, March 2026) — the successor to Qwen3-0.6B we started
+ * on, in the same runnable class. The llama.cpp inside our llama.rn build
+ * already knows the qwen35 architecture, so this is a config-only switch: no
+ * native rebuild, just a fresh download.
  *
- * Qwen 3 is a hybrid-reasoning model: it can emit <think>...</think> blocks
- * before its answer. Those must never reach the other agent, so replies are
- * stripped (see stripThinking) and the system prompt asks it not to think.
+ * nCtx is 2048, down from 4096, on purpose. The KV cache scales with context
+ * and was costing more memory than the model itself on the 4 GB tablet that
+ * kept getting OOM-killed; halving it buys back more than the +150 MB of
+ * weights. Agent turns are one or two sentences — 2048 tokens fits a whole
+ * conversation, and the engine trims oldest turns when it does not.
+ *
+ * Qwen keeps hybrid reasoning: it can emit <think>...</think> blocks before
+ * its answer. Those must never reach the other agent, so replies are
+ * stripped (see stripThinking) and prompts carry /no_think.
  */
 export const MODEL = {
   /** Single-file GGUF download (unsloth mirror — ungated, no HF token needed). */
-  url: 'https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf',
+  url: 'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf',
   /** Local filename to store it as. */
-  fileName: 'Qwen3-0.6B-Q4_K_M.gguf',
+  fileName: 'Qwen3.5-0.8B-Q4_K_M.gguf',
   /** Approx download size, for the UI. */
-  sizeLabel: '~370 MB',
+  sizeLabel: '~530 MB',
   /** Context window. */
-  nCtx: 4096,
+  nCtx: 2048,
 };
 
 export const SYSTEM_PROMPT =
