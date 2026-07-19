@@ -6,7 +6,7 @@ import {
   defineTool,
   createBuiltinTools,
 } from 'react-native-device-agent';
-import { MODEL, SYSTEM_PROMPT } from './config';
+import { MODEL, REMOTE_SYSTEM_PROMPT, SYSTEM_PROMPT, stripThinking } from './config';
 import { ensureModel } from './modelManager';
 
 export type Status = 'idle' | 'downloading' | 'loading' | 'ready' | 'thinking' | 'error';
@@ -26,6 +26,12 @@ export function useAgent() {
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const agentRef = useRef<Agent | null>(null);
+  /**
+   * Separate agent for messages arriving from other agents. It shares the
+   * engine (the expensive part) but keeps its own history, so a remote call
+   * never appears in — or contaminates — the local user's conversation.
+   */
+  const remoteAgentRef = useRef<Agent | null>(null);
 
   const append = useCallback((role: UIMessage['role'], text: string) => {
     const id = nextId();
@@ -70,6 +76,11 @@ export function useAgent() {
         engine,
         registry,
         systemPrompt: SYSTEM_PROMPT,
+      });
+      remoteAgentRef.current = new Agent({
+        engine,
+        registry,
+        systemPrompt: REMOTE_SYSTEM_PROMPT,
       });
       setStatus('ready');
     } catch (e) {
@@ -139,5 +150,39 @@ export function useAgent() {
     [status, append, updateText],
   );
 
-  return { status, progress, error, messages, initialize, send };
+  /**
+   * Answer a message that arrived from another agent via the relay.
+   *
+   * Each call starts from a clean history: these are one-shot agent-to-agent
+   * exchanges, and carrying context across callers would both leak one
+   * caller's conversation into another's and overflow the 4k window.
+   */
+  const answerRemote = useCallback(async (text: string): Promise<string> => {
+    const agent = remoteAgentRef.current;
+    if (!agent) throw new Error('model not loaded yet');
+    agent.reset();
+    const raw = await agent.send(text);
+    return stripThinking(raw) || '(no reply)';
+  }, []);
+
+  /** Append a line to the transcript from outside the chat flow. */
+  const appendLine = useCallback(
+    (role: UIMessage['role'], text: string) => append(role, text),
+    [append],
+  );
+
+  /** True once the model is loaded and not mid-generation. */
+  const idle = status === 'ready';
+
+  return {
+    status,
+    progress,
+    error,
+    messages,
+    initialize,
+    send,
+    answerRemote,
+    appendLine,
+    idle,
+  };
 }

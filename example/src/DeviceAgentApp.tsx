@@ -13,18 +13,64 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MODEL } from './config';
+import { DEFAULT_RELAY } from './relayConfig';
 import { useAgent, type UIMessage } from './useAgent';
+import { callPeerAgent, usePhoneInbox } from './usePhoneInbox';
 
 export function DeviceAgentApp() {
-  const { status, progress, error, messages, initialize, send } = useAgent();
+  const {
+    status,
+    progress,
+    error,
+    messages,
+    initialize,
+    send,
+    answerRemote,
+    appendLine,
+    idle,
+  } = useAgent();
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList<UIMessage>>(null);
+
+  // Relay wiring. Editable at runtime: each device polls its own mailbox and
+  // calls the other's, and these addresses change whenever the network does.
+  const [myRelay, setMyRelay] = useState(DEFAULT_RELAY.mine);
+  const [peerRelay, setPeerRelay] = useState(DEFAULT_RELAY.peer);
+  const [showRelay, setShowRelay] = useState(false);
+  const [calling, setCalling] = useState(false);
+
+  const inbox = usePhoneInbox({
+    relayUrl: myRelay,
+    enabled: idle,
+    answer: answerRemote,
+    onEvent: (line) => appendLine('tool', line),
+  });
 
   useEffect(() => {
     listRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
   const ready = status === 'ready' || status === 'thinking';
+
+  /** Place an outbound call to the other agent and show its reply. */
+  const onCallPeer = async () => {
+    const text = input.trim();
+    if (!text || calling) return;
+    setInput('');
+    setCalling(true);
+    appendLine('user', `📱 → other agent: ${text}`);
+    const res = await callPeerAgent({
+      peerUrl: peerRelay,
+      message: text,
+      from: DEFAULT_RELAY.from,
+    });
+    if (res.ok) {
+      appendLine('assistant', `📞 other agent: ${res.reply}`);
+    } else {
+      appendLine('tool', `⚠️  call failed: ${res.error}`);
+    }
+    setCalling(false);
+  };
 
   const onSend = () => {
     const text = input.trim();
@@ -37,9 +83,43 @@ export function DeviceAgentApp() {
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
       <View style={styles.header}>
-        <Text style={styles.title}>Device Agent</Text>
-        <Text style={styles.subtitle}>{statusLabel(status)}</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Device Agent</Text>
+          {ready && (
+            <Pressable onPress={() => setShowRelay((v) => !v)} hitSlop={10}>
+              <Text style={styles.relayToggle}>{showRelay ? 'hide' : 'relay'}</Text>
+            </Pressable>
+          )}
+        </View>
+        <Text style={styles.subtitle}>
+          {statusLabel(status)}
+          {ready ? ` · ${inboxLabel(inbox.status, inbox.answered)}` : ''}
+        </Text>
       </View>
+
+      {ready && showRelay && (
+        <View style={styles.relayPanel}>
+          <Text style={styles.relayLabel}>My mailbox (this device polls it)</Text>
+          <TextInput
+            style={styles.relayInput}
+            value={myRelay}
+            onChangeText={setMyRelay}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={styles.relayLabel}>Other agent's mailbox (calls go here)</Text>
+          <TextInput
+            style={styles.relayInput}
+            value={peerRelay}
+            onChangeText={setPeerRelay}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {inbox.lastError && (
+            <Text style={styles.relayError}>inbox error: {inbox.lastError}</Text>
+          )}
+        </View>
+      )}
 
       {!ready ? (
         <Gate status={status} progress={progress} error={error} onStart={initialize} />
@@ -67,6 +147,17 @@ export function DeviceAgentApp() {
               placeholderTextColor="#9ca3af"
               multiline
             />
+            <Pressable
+              style={[styles.callBtn, (status !== 'ready' || calling) && styles.sendBtnDisabled]}
+              onPress={onCallPeer}
+              disabled={status !== 'ready' || calling}
+            >
+              {calling ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.sendText}>Call</Text>
+              )}
+            </Pressable>
             <Pressable
               style={[styles.sendBtn, status !== 'ready' && styles.sendBtnDisabled]}
               onPress={onSend}
@@ -153,12 +244,24 @@ function Bubble({ message }: { message: UIMessage }) {
 function Hint() {
   return (
     <View style={styles.hint}>
-      <Text style={styles.hintText}>Try:</Text>
-      <Text style={styles.hintItem}>• "Copy 'hello world' to my clipboard, then read it back."</Text>
-      <Text style={styles.hintItem}>• "What time is it, and remind me in 30 seconds to stretch."</Text>
-      <Text style={styles.hintItem}>• "Save a note called todo.txt with three ideas, then list my files."</Text>
+      <Text style={styles.hintText}>Send — ask this device's own model:</Text>
+      <Text style={styles.hintItem}>• "What model are you running?"</Text>
+      <Text style={styles.hintItem}>• "What time is it?"</Text>
+      <Text style={styles.hintText}>Call — ask the agent on the other device:</Text>
+      <Text style={styles.hintItem}>• "Who are you and what device are you on?"</Text>
+      <Text style={styles.hintItem}>• "Introduce yourself in one sentence."</Text>
     </View>
   );
+}
+
+function inboxLabel(status: string, answered: number): string {
+  const n = answered > 0 ? ` (${answered})` : '';
+  switch (status) {
+    case 'listening': return `listening${n}`;
+    case 'answering': return 'answering a call…';
+    case 'error': return 'inbox unreachable';
+    default: return 'inbox off';
+  }
 }
 
 function statusLabel(status: string): string {
@@ -183,8 +286,37 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e2e8f0',
     backgroundColor: '#fff',
   },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 20, fontWeight: '700', color: '#0f172a' },
   subtitle: { fontSize: 13, color: '#64748b', marginTop: 2 },
+  relayToggle: { fontSize: 13, color: '#2563eb', fontWeight: '600' },
+  relayPanel: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e2e8f0',
+  },
+  relayLabel: { fontSize: 12, color: '#64748b', fontWeight: '600' },
+  relayInput: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: '#0f172a',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  relayError: { fontSize: 12, color: '#dc2626' },
+  callBtn: {
+    backgroundColor: '#059669',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   gate: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 18 },
   gateText: { fontSize: 16, color: '#334155', textAlign: 'center', lineHeight: 22 },
   errorText: { color: '#dc2626' },
