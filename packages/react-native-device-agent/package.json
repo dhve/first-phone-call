@@ -12,6 +12,7 @@
     "README.md"
   ],
   "scripts": {
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "echo 'TODO: react-native-builder-bob before publish' && tsc --noEmit"
   },
@@ -33,11 +34,31 @@
     "react-native": "*"
   },
   "peerDependenciesMeta": {
-    "expo-calendar": { "optional": true },
-    "expo-contacts": { "optional": true },
-    "expo-notifications": { "optional": true },
-    "expo-location": { "optional": true },
-    "expo-clipboard": { "optional": true },
-    "expo-file-system": { "optional": true }
+    "expo-calendar": {
+      "optional": true
+    },
+    "expo-contacts": {
+      "optional": true
+    },
+    "expo-notifications": {
+      "optional": true
+    },
+    "expo-location": {
+      "optional": true
+    },
+    "expo-clipboard": {
+      "optional": true
+    },
+    "expo-file-system": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "llama.rn": "^0.12.6",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "ajv": "^6.15.0"
   }
 }

@@ -1,0 +1,37 @@
+apply plugin: 'com.android.library'
+
+group = 'ai.host39.mobile'
+version = '1.0.0'
+
+def expoModulesCorePlugin = new File(project(':expo-modules-core').projectDir.absolutePath, 'ExpoModulesCorePlugin.gradle')
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+
+buildscript {
+  // Allow the app project to override SDK versions.
+  ext.safeExtGet = { prop, fallback ->
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+  }
+}
+
+android {
+  namespace 'ai.host39.mobile.host39native'
+  compileSdkVersion safeExtGet('compileSdkVersion', 36)
+
+  defaultConfig {
+    minSdkVersion safeExtGet('minSdkVersion', 26)
+    targetSdkVersion safeExtGet('targetSdkVersion', 36)
+    versionCode 1
+    versionName '1.0.0'
+  }
+
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // Owns the relay WebSocket inside the foreground service.
+  implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}

@@ -1,0 +1,78 @@
+# host39 — production stack
+#
+# Prerequisites:
+#   1. cp .env.prod.example .env.prod — fill in all values
+#   2. docker compose -f docker-compose.prod.yml --env-file .env.prod up --build -d
+#
+# Caddy exposes:
+#   :80  → HTTP (redirects to HTTPS automatically)
+#   :443 → agentcards.host39.org
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: host39
+      POSTGRES_USER: host39
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U host39 -d host39"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3010
+      DATABASE_URL: postgresql://host39:${POSTGRES_PASSWORD}@db:5432/host39
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      FRONTEND_URL: ${FRONTEND_URL}
+      # Host that actually serves public cards (agentcards.host39.org).
+      # Baked into /.well-known/ai-catalog.json entries and each card's
+      # _meta.publicUrl, so it must NOT default to localhost in production.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_HOST39_API_URL: ${NEXT_PUBLIC_HOST39_API_URL}
+        NEXT_PUBLIC_HOST39_CARDS_URL: ${NEXT_PUBLIC_HOST39_CARDS_URL}
+    environment:
+      PORT: 3002
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - server
+      - web
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  caddy_data:
+  caddy_config:

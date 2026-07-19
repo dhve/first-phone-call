@@ -40,7 +40,7 @@ export interface BuiltinToolsOptions {
 export function createBuiltinTools(options: BuiltinToolsOptions = {}): Tool[] {
   const tools: Tool[] = [];
   if (options.network !== false) tools.push(...createNetworkTools(options.network ?? {}));
-  if (options.filesystem !== false) tools.push(...createFilesystemTools(options.filesystem || {}));
+  if (options.filesystem !== false) tools.push(...createFilesystemTools(options.filesystem ?? {}));
   if (options.clipboard) tools.push(...createClipboardTools());
   if (options.location) tools.push(...createLocationTools());
   if (options.notifications) tools.push(...createNotificationTools());

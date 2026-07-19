@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["ai.host39.mobile.host39native.Host39NativeModule"]
+  }
+}

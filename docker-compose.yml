@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: host39
+      POSTGRES_USER: host39
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-host39-local}
+    ports: ["5434:5432"]
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U host39 -d host39"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  server:
+    build: { context: ./server, dockerfile: Dockerfile }
+    environment:
+      # This is the local dev stack, so run as development: the shipped default
+      # JWT_SECRET is accepted (the production guards reject it) and logs are
+      # verbose. Use docker-compose.prod.yml for production.
+      NODE_ENV: development
+      PORT: 3010
+      DATABASE_URL: postgresql://host39:${POSTGRES_PASSWORD:-host39-local}@db:5432/host39
+      JWT_SECRET: ${JWT_SECRET:-host39-dev-secret}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3002}
+      # Base URL cards are served from, baked into catalog/_meta public URLs.
+      # In dev the API serves cards on the same origin.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3010}
+    ports: ["3010:3010"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_HOST39_API_URL: ${NEXT_PUBLIC_HOST39_API_URL:-http://localhost:3010}
+        NEXT_PUBLIC_HOST39_CARDS_URL: ${NEXT_PUBLIC_HOST39_CARDS_URL:-http://localhost:3010}
+    environment:
+      PORT: 3002
+    ports: ["3002:3002"]
+    depends_on: [server]
+
+volumes:
+  db_data:

@@ -2,8 +2,8 @@
  * Core type contracts for the device-agent harness.
  *
  * These are intentionally framework-agnostic: a `Tool` is just a described
- * async function, and the agent loop only depends on these shapes — not on
- * llama.rn directly — so the harness stays testable and portable.
+ * async function, and the agent loop only depends on these shapes (not on
+ * llama.rn directly), so the harness stays testable and portable.
  */
 
 /** A minimal JSON-Schema object describing a tool's parameters. */
@@ -83,6 +83,10 @@ export type AgentEvent =
   | { type: 'tool_result'; callId: string; name: string; result: unknown; error?: string }
   | { type: 'step'; index: number }
   | { type: 'final'; content: string }
+  /** Terminal: the run was cancelled via its AbortSignal. */
+  | { type: 'cancelled' }
+  /** Terminal: `maxSteps` iterations elapsed without a final answer. */
+  | { type: 'max_steps'; steps: number }
   | { type: 'error'; error: string };
 
 export type AgentEventHandler = (event: AgentEvent) => void;

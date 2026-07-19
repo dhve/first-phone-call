@@ -1,37 +1,53 @@
+# Environment
+.env
+.env.prod
+.env.local
+
 # Dependencies
 node_modules/
+server/node_modules/
+web/node_modules/
 
-# Builds
+# Build outputs
 dist/
 lib/
 build/
 *.tsbuildinfo
+server/tsconfig.tsbuildinfo
+web/tsconfig.tsbuildinfo
+server/dist/
+web/.next/
+web/out/
 
-# Native
+# Native (React Native / Expo — example app + mobile app)
 ios/Pods/
 ios/build/
 android/.gradle/
 android/build/
 android/app/build/
 *.xcworkspace/xcuserdata/
-
-# Expo
 .expo/
 .expo-shared/
 web-build/
-dist/
 
 # Models (large GGUF files — never commit)
 *.gguf
 models/
 
-# Logs / env / OS
-*.log
-.env
-.env.local
+# Docker volumes (if bind-mounted locally)
+postgres-data/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
 
 # Editor
 .idea/
+*.swp
+*.swo
 .vscode/*
 !.vscode/extensions.json

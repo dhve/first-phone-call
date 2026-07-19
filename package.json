@@ -1,20 +1,30 @@
 {
-  "name": "device-agent-monorepo",
-  "version": "0.0.0",
+  "name": "host39",
+  "version": "0.2.0",
   "private": true,
-  "description": "On-device LLM agent harness for React Native, plus a demo app.",
+  "description": "host39 phone agent monorepo: server, web dashboard, Android app, and internal Device Agent package, plus a standalone example demo app for the device-agent harness.",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "workspaces": [
-    "packages/*",
+    "server",
+    "web",
+    "mobile",
+    "packages/react-native-device-agent",
     "example"
   ],
   "scripts": {
-    "build": "npm run build --workspace packages/react-native-device-agent",
-    "typecheck": "tsc -b",
-    "example": "npm run --workspace example",
-    "ios": "npm run --workspace example ios",
-    "android": "npm run --workspace example android"
-  },
-  "engines": {
-    "node": ">=20"
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "dev:mobile": "npm run start -w mobile",
+    "android": "npm run android -w mobile",
+    "build": "npm run build -w server && npm run build -w web",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "migrate": "npm run migrate -w server",
+    "example:start": "npm run start --workspace example",
+    "example:ios": "npm run ios --workspace example",
+    "example:android": "npm run android --workspace example",
+    "example:web": "npm run web --workspace example"
   }
 }

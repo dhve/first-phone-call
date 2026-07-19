@@ -1,3 +1,4 @@
+import Ajv from 'ajv';
 import type { Tool, ToolSpec, ToolContext } from './types';
 
 /**
@@ -5,10 +6,13 @@ import type { Tool, ToolSpec, ToolContext } from './types';
  *
  * The registry is the core developer-facing API: apps call `register()` with a
  * plain async function plus a JSON-Schema description, and the agent does the
- * rest.
+ * rest. Each tool's schema is compiled with Ajv once at registration, and
+ * every invocation is validated against it before the tool runs.
  */
 export class ToolRegistry {
   private tools = new Map<string, Tool<any, any>>();
+  private validators = new Map<string, Ajv.ValidateFunction>();
+  private ajv = new Ajv({ allErrors: true });
 
   constructor(tools: Tool<any, any>[] = []) {
     for (const tool of tools) this.register(tool);
@@ -18,11 +22,21 @@ export class ToolRegistry {
     if (this.tools.has(tool.name)) {
       throw new Error(`Tool "${tool.name}" is already registered`);
     }
+    let validate: Ajv.ValidateFunction;
+    try {
+      validate = this.ajv.compile(tool.parameters);
+    } catch (e) {
+      throw new Error(
+        `Tool "${tool.name}" has an invalid parameters schema: ${(e as Error).message}`,
+      );
+    }
     this.tools.set(tool.name, tool as Tool<any, any>);
+    this.validators.set(tool.name, validate);
     return this;
   }
 
   unregister(name: string): boolean {
+    this.validators.delete(name);
     return this.tools.delete(name);
   }
 
@@ -51,9 +65,10 @@ export class ToolRegistry {
   }
 
   /**
-   * Parse a raw model-emitted argument string and run the tool.
-   * Returns either a result or a structured error (never throws), so a bad
-   * tool call degrades into feedback the model can recover from.
+   * Parse a raw model-emitted argument string, validate it against the tool's
+   * JSON Schema, and run the tool. Returns either a result or a structured
+   * error (never throws), so a bad tool call degrades into feedback the model
+   * can recover from.
    */
   async invoke(
     name: string,
@@ -72,11 +87,12 @@ export class ToolRegistry {
       return { error: `Arguments were not valid JSON: ${(e as Error).message}. Received: ${rawArgs}` };
     }
 
-    const missing = (tool.parameters.required ?? []).filter(
-      (key) => !(args as Record<string, unknown>)[key],
-    );
-    if (missing.length) {
-      return { error: `Missing required argument(s): ${missing.join(', ')}` };
+    const validate = this.validators.get(name);
+    if (validate && !validate(args)) {
+      const details = (validate.errors ?? [])
+        .map((err) => `${err.dataPath || '(root)'} ${err.message ?? 'is invalid'}`)
+        .join('; ');
+      return { error: `Invalid arguments for tool "${name}": ${details}` };
     }
 
     try {

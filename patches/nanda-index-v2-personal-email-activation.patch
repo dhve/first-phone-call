@@ -1,0 +1,265 @@
+From 400e4e99a039d9a73b4ccc278623f610c4d29886 Mon Sep 17 00:00:00 2001
+From: dhve <v3dhkrishnan@gmail.com>
+Date: Sun, 19 Jul 2026 13:40:31 -0400
+Subject: [PATCH] feat: personal registrations require URN email match and
+ activate on email verification
+
+---
+ server/src/db/queries/organizations.ts        |  17 +-
+ server/src/routes/index-records.ts            |   6 +-
+ server/src/routes/orgs.ts                     |  12 ++
+ .../integration/personal-registration.test.ts | 153 ++++++++++++++++++
+ 4 files changed, 181 insertions(+), 7 deletions(-)
+ create mode 100644 server/tests/integration/personal-registration.test.ts
+
+diff --git a/server/src/db/queries/organizations.ts b/server/src/db/queries/organizations.ts
+index 6188494..cbc3865 100644
+--- a/server/src/db/queries/organizations.ts
++++ b/server/src/db/queries/organizations.ts
+@@ -180,8 +180,10 @@ export async function insertOrganization(params: InsertOrgParams): Promise<Organ
+  * Changing the `domain` invalidates the ownership proof: the prior verification
+  * was for the old domain, so domain_verified and any pending challenge are
+  * cleared, and an active org reverts to 'pending' until the new domain is
+- * re-verified. This keeps the invariant "active ⇒ domain_verified" — otherwise
+- * an admin could verify one domain then silently swap in another they don't own.
++ * re-verified. This keeps the invariant "active with a domain implies
++ * domain_verified" (personal orgs have no domain and activate via verified
++ * email instead) — otherwise an admin could verify one domain then silently
++ * swap in another they don't own.
+  *
+  * Returns null if org_id not found.
+  */
+@@ -227,9 +229,11 @@ export async function updateOrganization(
+ /**
+  * Marks an organization's contact email as verified and clears the token.
+  *
+- * This proves contact-email reachability only — it does NOT activate the org.
+- * Activation is gated on domain ownership (see markDomainVerified). Returns
+- * null if no org matched the token or the token has expired.
++ * For domain-based registrations this proves contact-email reachability only;
++ * activation stays gated on domain ownership (see markDomainVerified). For
++ * personal registrations (no domain), the verified email IS the identity the
++ * URN is derived from, so a pending org activates here. Returns null if no
++ * org matched the token or the token has expired.
+  */
+ export async function markEmailVerifiedByToken(token: string): Promise<Organization | null> {
+   const sql = getSql();
+@@ -238,6 +242,9 @@ export async function markEmailVerifiedByToken(token: string): Promise<Organizat
+       email_verified           = TRUE,
+       verify_token             = NULL,
+       verify_token_expires_at  = NULL,
++      status                   = CASE
++        WHEN domain IS NULL AND status = 'pending' THEN 'active'
++        ELSE status END,
+       updated_at               = NOW()
+     WHERE verify_token = ${token}
+       AND verify_token_expires_at > NOW()
+diff --git a/server/src/routes/index-records.ts b/server/src/routes/index-records.ts
+index 8d21e9a..ecb46f9 100644
+--- a/server/src/routes/index-records.ts
++++ b/server/src/routes/index-records.ts
+@@ -8,7 +8,9 @@ import { apiErrorSchema } from '../types/api/common.js';
+  *
+  * GET /api/v1/index           — list all active organizations as IndexRecord[]
+  * GET /api/v1/index/:org_id   — get a single IndexRecord, 404 on miss
+- * GET /api/v1/verify-email    — mark org contact email verified (does not activate)
++ * GET /api/v1/verify-email    — mark org contact email verified (activates
++ *                               personal registrations; domain paths still
++ *                               require domain verification)
+  */
+ export async function registerIndexRecordRoutes(fastify: FastifyInstance): Promise<void> {
+   // List all active index records
+@@ -52,7 +54,7 @@ export async function registerIndexRecordRoutes(fastify: FastifyInstance): Promi
+   fastify.get<{ Querystring: { token?: string } }>('/api/v1/verify-email', {
+     schema: {
+       tags: ['auth'],
+-      summary: 'Verify org contact email (activation requires domain verification)',
++      summary: 'Verify org contact email (activates personal registrations; domain paths require domain verification)',
+       querystring: {
+         type: 'object',
+         required: ['token'],
+diff --git a/server/src/routes/orgs.ts b/server/src/routes/orgs.ts
+index 00291b8..ccd91e8 100644
+--- a/server/src/routes/orgs.ts
++++ b/server/src/routes/orgs.ts
+@@ -156,6 +156,18 @@ export async function registerOrgRoutes(fastify: FastifyInstance): Promise<void>
+       return reply.code(400).send({ error: 'VALIDATION', detail: 'domain must be a valid hostname (e.g. acme.com)' });
+     }
+ 
++    // Personal registrations: identifier must be an email agent URN whose
++    // email matches contact_email, since the verified email is the identity.
++    if (isPersonal) {
++      const urnMatch = /^urn:ai:email:(.+@[^:]+):agent:[a-z0-9][a-z0-9-]*[a-z0-9]$/i.exec(body.identifier ?? '');
++      if (!urnMatch) {
++        return reply.code(400).send({ error: 'VALIDATION', detail: 'personal registrations require identifier to be an agent URN: urn:ai:email:<email>:agent:<slug>' });
++      }
++      if (urnMatch[1]!.toLowerCase() !== body.contact_email.toLowerCase()) {
++        return reply.code(400).send({ error: 'VALIDATION', detail: 'contact_email must match the email in the agent URN identifier' });
++      }
++    }
++
+     // registry_url: required for registry, smb, personal — not for dns-aid
+     if (!isDnsAid) {
+       if (!body.registry_url) {
+diff --git a/server/tests/integration/personal-registration.test.ts b/server/tests/integration/personal-registration.test.ts
+new file mode 100644
+index 0000000..f48ef1f
+--- /dev/null
++++ b/server/tests/integration/personal-registration.test.ts
+@@ -0,0 +1,153 @@
++import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
++import type { FastifyInstance } from 'fastify';
++import { buildServer } from '../../src/server.js';
++import { getSql } from '../../src/db/client.js';
++import { upsertUser } from '../../src/db/queries/users.js';
++import { findByOrgId } from '../../src/db/queries/organizations.js';
++
++async function makeToken(fastify: FastifyInstance, userId: string, email: string): Promise<string> {
++  return fastify.jwt.sign({ userId, email, displayName: null });
++}
++
++const PERSONAL_EMAIL = 'holder@example.com';
++
++function personalPayload(orgId: string, overrides: Record<string, unknown> = {}) {
++  return {
++    org_id:        orgId,
++    display_name:  'Personal Agent',
++    hosting_path:  'personal',
++    contact_email: PERSONAL_EMAIL,
++    registry_url:  'https://host39.example.com/personal/holder/assistant.json',
++    identifier:    `urn:ai:email:${PERSONAL_EMAIL}:agent:assistant`,
++    media_type:    'application/a2a-agent-card+json',
++    ...overrides,
++  };
++}
++
++describe('Personal registrations: URN email match and email-verification activation', () => {
++  let fastify: FastifyInstance;
++  let token: string;
++
++  beforeAll(async () => {
++    const built = await buildServer({ logger: false });
++    fastify = built.fastify;
++    await fastify.ready();
++
++    const user = await upsertUser({
++      email:       'personal-test@example.com',
++      displayName: 'Personal Test',
++      avatarUrl:   null,
++      provider:    'google',
++      providerId:  'personal-test-provider-id',
++    });
++    token = await makeToken(fastify, user.id, user.email);
++  });
++
++  afterAll(async () => {
++    await fastify.close();
++    const { closeSql } = await import('../../src/db/client.js');
++    await closeSql();
++  });
++
++  beforeEach(async () => {
++    const sql = getSql();
++    await sql`DELETE FROM org_memberships USING organizations
++              WHERE org_memberships.org_id = organizations.org_id
++              AND organizations.org_id LIKE 'personal-%'`;
++    await sql`DELETE FROM organizations WHERE org_id LIKE 'personal-%'`;
++  });
++
++  async function create(payload: Record<string, unknown>) {
++    return fastify.inject({
++      method: 'POST',
++      url: '/api/v1/orgs',
++      headers: { authorization: `Bearer ${token}` },
++      payload,
++    });
++  }
++
++  it('accepts a personal registration whose URN email matches contact_email', async () => {
++    const res = await create(personalPayload('personal-ok'));
++    expect(res.statusCode).toBe(201);
++    const body = res.json();
++    expect(body.status).toBe('pending');
++    expect(body.email_verified).toBe(false);
++  });
++
++  it('rejects a personal registration when the URN email does not match contact_email', async () => {
++    const res = await create(personalPayload('personal-mismatch', {
++      identifier: 'urn:ai:email:someone-else@example.com:agent:assistant',
++    }));
++    expect(res.statusCode).toBe(400);
++    expect(res.json().detail).toMatch(/contact_email must match/);
++  });
++
++  it('rejects a personal registration with a malformed identifier URN', async () => {
++    const res = await create(personalPayload('personal-malformed', {
++      identifier: 'urn:ai:domain:example.com',
++    }));
++    expect(res.statusCode).toBe(400);
++    expect(res.json().detail).toMatch(/urn:ai:email/);
++  });
++
++  it('rejects a personal registration with no identifier at all', async () => {
++    const payload = personalPayload('personal-noid');
++    delete (payload as Record<string, unknown>).identifier;
++    const res = await create(payload);
++    expect(res.statusCode).toBe(400);
++  });
++
++  it('treats URN email case-insensitively', async () => {
++    const res = await create(personalPayload('personal-case', {
++      identifier: `urn:ai:email:${PERSONAL_EMAIL.toUpperCase()}:agent:assistant`,
++    }));
++    expect(res.statusCode).toBe(201);
++  });
++
++  it('activates a personal registration on email verification', async () => {
++    const res = await create(personalPayload('personal-activate'));
++    expect(res.statusCode).toBe(201);
++
++    const sql = getSql();
++    const rows = await sql<{ verifyToken: string }[]>`
++      SELECT verify_token FROM organizations WHERE org_id = 'personal-activate'
++    `;
++    const verifyToken = rows[0]!.verifyToken;
++
++    const verifyRes = await fastify.inject({
++      method: 'GET',
++      url: `/api/v1/verify-email?token=${verifyToken}`,
++    });
++    expect(verifyRes.statusCode).toBe(200);
++    const body = verifyRes.json();
++    expect(body.email_verified).toBe(true);
++    expect(body.status).toBe('active');
++  });
++
++  it('does not activate a domain-based registration on email verification', async () => {
++    const res = await create({
++      org_id:        'personal-domainorg',
++      display_name:  'Domain Org',
++      domain:        'domainorg.example.com',
++      contact_email: 'admin@domainorg.example.com',
++      registry_url:  'https://domainorg.example.com/registry',
++    });
++    expect(res.statusCode).toBe(201);
++
++    const sql = getSql();
++    const rows = await sql<{ verifyToken: string }[]>`
++      SELECT verify_token FROM organizations WHERE org_id = 'personal-domainorg'
++    `;
++    const verifyRes = await fastify.inject({
++      method: 'GET',
++      url: `/api/v1/verify-email?token=${rows[0]!.verifyToken}`,
++    });
++    expect(verifyRes.statusCode).toBe(200);
++    const body = verifyRes.json();
++    expect(body.email_verified).toBe(true);
++    expect(body.status).toBe('pending');
++
++    const org = await findByOrgId('personal-domainorg');
++    expect(org!.status).toBe('pending');
++  });
++});
+-- 
+2.39.5 (Apple Git-154)
+

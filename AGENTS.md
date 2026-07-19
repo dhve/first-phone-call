@@ -51,6 +51,47 @@ card for anything — it's the machine-readable version of this list. In prose:
   groups happen to be enabled here; `react-native-device-agent` itself lets any consuming app
   enable a different subset.
 
+## Gotcha: this repo merges two unrelated git histories
+
+`main` is the result of merging two git histories that share **no common ancestor**
+(`git merge-base` returns nothing between them) — not just a normal divergence.
+
+- One side is the original standalone `react-native-device-agent` harness repo (root commit
+  `20f9925`) — the demo app, `example/`, and this AgentFacts card all come from here.
+- The other side (`origin/main` at the time of the merge) is a **completely separate git init**
+  (root commit `d276404`) containing the actual built-out Host39 monorepo (`server/`, `web/`,
+  `mobile/`, Docker/Caddy config) described in `host39_plan.txt`. Per its own
+  `packages/react-native-device-agent/UPSTREAM.md`, that side imported a *copy* of this harness
+  from `https://github.com/tremblerz/device-agent` at commit `30ca528` and then diverged
+  independently (added cancellation, Ajv validation, tests).
+
+Merging required `git merge --allow-unrelated-histories`, which produced real
+add/add conflicts (git had no shared base to three-way-diff against) in 12 files. How those
+were resolved, in case it comes up again (e.g. a future rebase, or bisecting across the merge
+commit):
+
+- **`packages/react-native-device-agent/**` (8 files)** — took `origin/main`'s version
+  entirely. Confirmed before merging that the local side had zero changes to this directory
+  since the `30ca528` import point, so origin's version (tests, Ajv validation, cancellation
+  support) is a strict superset, not a competing edit.
+- **Root `package.json`** — kept Host39's identity/scripts (`name: "host39"`, `dev:server`,
+  `dev:web`, `android` now means the `mobile` workspace's Android app, **not** the demo). Added
+  `"example"` back into `workspaces` and re-exposed the demo app's scripts under an
+  `example:*` prefix (`example:start`, `example:ios`, `example:android`, `example:web`) instead
+  of the old bare `ios`/`android` names, which now unambiguously mean the Host39 phone app.
+- **Root `README.md`** — kept Host39's README as the authoritative doc (it documents the real,
+  running product), appended an "Also in this repo" section so `example/`,
+  `packages/react-native-device-agent`, and this card stay discoverable.
+- **`.gitignore`** — unioned both sides (Host39's server/web/docker ignores + the original
+  repo's Expo/native/GGUF-model ignores).
+- **`package-lock.json`** — took origin's version, then ran `npm install
+  --package-lock-only --workspaces --include-workspace-root` to fold the restored `example`
+  workspace back in rather than hand-editing a generated file.
+
+If you're bisecting, blaming, or rebasing across the merge commit, expect normal git history
+tools to behave oddly on either side of it — there is no linear relationship between commits
+on the two original histories.
+
 ## Keeping this in sync
 
 If any of the above changes — a real endpoint ships, the card gets signed, it gets registered
