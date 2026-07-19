@@ -123,9 +123,13 @@ export function useAgent() {
         registry,
         systemPrompt: SYSTEM_PROMPT,
       });
+      // No tool registry on the agent-to-agent paths, deliberately. Tools
+      // pull a 0.6B model into tech-assistant mode: asked "broccoli or
+      // carrot?" it answered about accessibility and performance, told
+      // "First call on Internet" it tried to resolve a hostname. A
+      // conversation partner just talks; only the local chat gets tools.
       remoteAgentRef.current = new Agent({
         engine,
-        registry,
         systemPrompt: REMOTE_SYSTEM_PROMPT,
         maxTokens: REMOTE_MAX_TOKENS,
       });
@@ -225,12 +229,24 @@ export function useAgent() {
     }
     remoteTurnsRef.current += 1;
 
-    let reply = stripThinking(await withEngine(() => agent.send(text)));
+    // The instruction rides in the message, not just the system prompt. A
+    // 0.6B model mostly ignores its system prompt but follows the turn in
+    // front of it — the driving side of a conversation got coherent the
+    // moment its turns were framed this way, while this side kept answering
+    // "do you prefer broccoli or carrots?" with assistant boilerplate about
+    // scheduling, because the bare text carried no instruction at all.
+    const framed =
+      `The other agent says: "${text}". Reply as yourself in one or two ` +
+      `casual sentences. Answer what they actually asked; if they ask you ` +
+      `to choose between things, pick one and give a quick reason — never ` +
+      `refuse, never offer help with tasks.`;
+
+    let reply = stripThinking(await withEngine(() => agent.send(framed)));
 
     // A stray <think> block can burn the whole token budget and strip to
     // nothing. One retry with thinking forced off for the turn.
     if (!reply) {
-      reply = stripThinking(await withEngine(() => agent.send(text)));
+      reply = stripThinking(await withEngine(() => agent.send(framed)));
     }
 
     // Parroting the prompt back is the failure mode of a small model in a long
