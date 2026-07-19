@@ -14,7 +14,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { MODEL } from './config';
 import { isModelDownloaded } from './modelManager';
-import { DEFAULT_RELAY_URL } from './relayConfig';
+import { loadRelayUrl, saveRelayUrl } from './relayStore';
 import { useAgent, type UIMessage } from './useAgent';
 import { callPeerAgent, usePhoneInbox } from './usePhoneInbox';
 
@@ -34,9 +34,23 @@ export function DeviceAgentApp() {
   const listRef = useRef<FlatList<UIMessage>>(null);
 
   // Only the relay address is configured; lanes and peer are auto-assigned.
-  // It stays editable because LAN addresses move with the network.
-  const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY_URL);
+  // It stays editable because LAN addresses move with the network, and is
+  // persisted so a correction survives the next reload.
+  //
+  // The draft is separate from the committed value on purpose: usePhoneInbox
+  // restarts its pairing loop whenever relayUrl changes, so binding the input
+  // straight to it would tear down and re-register on every keystroke.
+  const [relayUrl, setRelayUrl] = useState(loadRelayUrl);
+  const [relayDraft, setRelayDraft] = useState(relayUrl);
   const [showRelay, setShowRelay] = useState(false);
+
+  const commitRelayUrl = () => {
+    const next = relayDraft.trim();
+    if (!next || next === relayUrl) return;
+    saveRelayUrl(next);
+    setRelayUrl(next);
+    appendLine('tool', `🔗 relay set to ${next}`);
+  };
   const [calling, setCalling] = useState(false);
 
   const inbox = usePhoneInbox({
@@ -114,8 +128,11 @@ export function DeviceAgentApp() {
           <Text style={styles.relayLabel}>Relay address</Text>
           <TextInput
             style={styles.relayInput}
-            value={relayUrl}
-            onChangeText={setRelayUrl}
+            value={relayDraft}
+            onChangeText={setRelayDraft}
+            onBlur={commitRelayUrl}
+            onSubmitEditing={commitRelayUrl}
+            returnKeyType="done"
             autoCapitalize="none"
             autoCorrect={false}
           />

@@ -47,7 +47,15 @@ export function deviceId(): string {
   return id;
 }
 
-/** Human-readable name shown on the other device and in relay logs. */
+/**
+ * Human-readable name shown on the other device and in relay logs.
+ *
+ * The suffix is what makes two identical phones tellable apart on the
+ * projector — without it every device is "Android agent" and the log gives no
+ * way to see which one answered.
+ */
 export function deviceName(): string {
-  return Platform.OS === 'android' ? 'Android agent' : 'Device agent';
+  const base = Platform.OS === 'android' ? 'Android agent' : 'Device agent';
+  const suffix = deviceId().slice(-4);
+  return `${base} (${suffix})`;
 }

@@ -149,7 +149,7 @@ app.get('/agent-card', (_req: Request, res: Response) => {
     protocolVersion: '0.2.0',
     name: AGENT_NAME,
     description:
-      'An AI agent running entirely on an Android phone (Qwen2.5-1.5B via llama.rn). ' +
+      'An AI agent running entirely on an Android phone (Qwen3-0.6B via llama.rn). ' +
       'Reached through a store-and-forward relay because phones cannot accept inbound HTTP.',
     url: `${PUBLIC_URL}/run`,
     version: '0.1.0',

@@ -108,8 +108,19 @@ export function usePhoneInbox(options: InboxOptions) {
           if (res.status === 204) {
             setStatus('listening');
             await sleep(INBOX_POLL_MS);
+            if (cancelled) return;
+
             // Cheap keepalive + peer refresh; the relay uses it for liveness.
-            void register();
+            // The result is reconciled rather than discarded: if the relay was
+            // restarted its registry is empty, both devices re-register in
+            // whatever order they happen to poll, and either one can come back
+            // on the other's lane. Polling a lane we no longer own means our
+            // messages go to the other phone, so follow the reassignment.
+            const again = await register();
+            if (again && again.agentId !== me.agentId) {
+              emit(`🔄 relay reassigned me to lane ${again.agentId}`);
+              me = again;
+            }
             continue;
           }
           if (!res.ok) throw new Error(`inbox returned ${res.status}`);
