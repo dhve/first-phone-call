@@ -63,9 +63,19 @@ export const CONVERSATION_SYSTEM_PROMPT =
   'You are an AI agent on a phone, talking to another AI agent on a different ' +
   'phone. You are working together to settle one question. Reply in one or two ' +
   'short sentences, plain text, no markdown, no reasoning. Respond to what the ' +
-  'other agent actually said. When you genuinely agree with them and there is ' +
-  'nothing left to settle, end your message with the single word ' +
-  `${AGREEMENT_MARKER}. Do not use that word until you truly agree. /no_think`;
+  'other agent actually said. Take a clear position first and give a reason ' +
+  'for it. Only after several exchanges, if you genuinely agree and nothing ' +
+  `is left to settle, end that message with the single word ${AGREEMENT_MARKER}. ` +
+  'Never open with agreement. /no_think';
+
+/**
+ * Exchanges that must happen before agreement is allowed to end the run.
+ *
+ * A 0.6B model latches onto the marker and will open with "Agreed." if
+ * permitted, which ends the conversation before it starts. Ignoring the marker
+ * early forces an actual exchange.
+ */
+export const MIN_TURNS_BEFORE_AGREEMENT = 3;
 
 /** Hard stop, so a pair of agents cannot talk forever on stage. */
 export const CONVERSATION_MAX_TURNS = 8;

@@ -52,6 +52,27 @@ export function useAgent() {
   const remoteCallerRef = useRef<string | null>(null);
   const remoteTurnsRef = useRef(0);
 
+  /**
+   * Serializes everything that touches the model.
+   *
+   * There is one llama context, and three things want it: the local chat, an
+   * incoming call, and our own side of a conversation. They must not overlap.
+   * The obvious alternative — refusing to listen while busy — deadlocks the
+   * moment both phones start a conversation at once: each waits for a reply
+   * the other has stopped being able to give. Queueing lets both proceed, just
+   * one at a time.
+   */
+  const lockRef = useRef<Promise<unknown>>(Promise.resolve());
+  const withEngine = useCallback(<T,>(fn: () => Promise<T>): Promise<T> => {
+    const run = lockRef.current.then(fn, fn);
+    // Keep the chain alive even if this turn rejected.
+    lockRef.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }, []);
+
   const append = useCallback((role: UIMessage['role'], text: string) => {
     const id = nextId();
     setMessages((prev) => [...prev, { id, role, text }]);
@@ -197,21 +218,24 @@ export function useAgent() {
     }
     remoteTurnsRef.current += 1;
 
-    const raw = await agent.send(text);
+    const raw = await withEngine(() => agent.send(text));
     return stripThinking(raw) || '(no reply)';
-  }, []);
+  }, [withEngine]);
 
   /**
    * Produce this device's next line in a conversation with another agent.
    * Unlike `send`, nothing is written to the transcript here — the caller
    * decides how to display a turn it is also relaying over the network.
    */
-  const converseTurn = useCallback(async (text: string): Promise<string> => {
-    const agent = conversationAgentRef.current;
-    if (!agent) throw new Error('model not loaded yet');
-    const raw = await agent.send(text);
-    return stripThinking(raw) || '(no reply)';
-  }, []);
+  const converseTurn = useCallback(
+    async (text: string): Promise<string> => {
+      const agent = conversationAgentRef.current;
+      if (!agent) throw new Error('model not loaded yet');
+      const raw = await withEngine(() => agent.send(text));
+      return stripThinking(raw) || '(no reply)';
+    },
+    [withEngine],
+  );
 
   /** Begin a fresh conversation, discarding any previous one. */
   const resetConversation = useCallback(() => {
