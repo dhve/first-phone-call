@@ -1,13 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { getSql } from '../db/client.js';
 import { buildConfig } from '../config.js';
+import { buildPersonalUrn } from '../urn.js';
 import type { DbUser, DbAgentCard, A2AAgentCard } from '../types.js';
 
 function buildIdentifier(user: DbUser, slug: string): string {
   if (user.identityType === 'domain' && user.domain) {
     return `urn:ai:domain:${user.domain}:agent:${slug}`;
   }
-  return `urn:ai:email:${user.email}:agent:${slug}`;
+  return buildPersonalUrn(user.email, slug);
 }
 
 function buildPublicUrl(user: DbUser, slug: string, baseUrl: string): string {
@@ -47,7 +48,7 @@ export async function registerPublicRoutes(fastify: FastifyInstance): Promise<vo
   // IMPORTANT: Register /personal/:email/:slug.json BEFORE /:domain/:slug.json
   // so Fastify matches the more specific route first.
 
-  // GET /personal/:email/:slug.json — personal (email-identity) user card
+  // GET /personal/:email/:slug.json - personal (email-identity) user card
   fastify.get<{ Params: { email: string; slug: string } }>(
     '/personal/:email/:slug.json',
     {
@@ -78,6 +79,16 @@ export async function registerPublicRoutes(fastify: FastifyInstance): Promise<vo
         return reply.code(404).send({ error: 'NOT_FOUND', detail: 'user not found' });
       }
 
+      // Phone-hosted agents: serve the latest verified signed card from the
+      // cache, even while the phone is offline.
+      const [cachedCard] = await sql<{ card: Record<string, unknown> }[]>`
+        SELECT card FROM card_cache WHERE user_id = ${user.id} AND slug = ${slug}
+      `;
+      if (cachedCard) {
+        reply.header('Content-Type', 'application/a2a-agent-card+json');
+        return reply.send(cachedCard.card);
+      }
+
       const [card] = await sql<DbAgentCard[]>`
         SELECT * FROM agent_cards
         WHERE user_id = ${user.id} AND slug = ${slug} AND status = 'active'
@@ -95,7 +106,7 @@ export async function registerPublicRoutes(fastify: FastifyInstance): Promise<vo
     },
   );
 
-  // GET /:domain/:slug.json — domain-identity user card (SMB)
+  // GET /:domain/:slug.json - domain-identity user card (SMB)
   fastify.get<{ Params: { domain: string; slug: string } }>(
     '/:domain/:slug.json',
     {
@@ -141,7 +152,7 @@ export async function registerPublicRoutes(fastify: FastifyInstance): Promise<vo
     },
   );
 
-  // GET /.well-known/ai-catalog.json — aggregate catalog of all active cards
+  // GET /.well-known/ai-catalog.json - aggregate catalog of all active cards
   fastify.get(
     '/.well-known/ai-catalog.json',
     {

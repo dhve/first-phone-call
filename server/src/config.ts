@@ -40,6 +40,19 @@ export interface Config {
   };
   readonly frontendUrl: string;
   readonly publicBaseUrl: string;
+  readonly relay: {
+    readonly publicUrl: string;
+    readonly tokenTtlSeconds: number;
+    readonly heartbeatIntervalMs: number;
+    readonly heartbeatMaxMissed: number;
+    readonly maxPayloadBytes: number;
+  };
+  readonly runtime: {
+    readonly timeoutMs: number;
+    readonly maxRequestBytes: number;
+    readonly rateLimitMax: number;
+    readonly rateLimitWindowMs: number;
+  };
 }
 
 const DEV_JWT_SECRET = 'host39-dev-secret-change-in-production';
@@ -60,6 +73,8 @@ export function buildConfig(): Config {
     }
   }
 
+  const publicBaseUrl = optionalEnv('PUBLIC_BASE_URL', 'http://localhost:3010');
+
   return {
     port: parsePositiveInt('PORT', optionalEnv('PORT', '3010')),
     nodeEnv,
@@ -72,6 +87,20 @@ export function buildConfig(): Config {
       expiresIn: optionalEnv('JWT_EXPIRES_IN', '7d'),
     },
     frontendUrl: optionalEnv('FRONTEND_URL', 'http://localhost:3002'),
-    publicBaseUrl: optionalEnv('PUBLIC_BASE_URL', 'http://localhost:3010'),
+    publicBaseUrl,
+    relay: {
+      // Public WebSocket URL that phones connect to (returned with relay-session tokens)
+      publicUrl: optionalEnv('RELAY_PUBLIC_URL', `${publicBaseUrl.replace(/^http/, 'ws')}/relay`),
+      tokenTtlSeconds: parsePositiveInt('RELAY_TOKEN_TTL_SECONDS', optionalEnv('RELAY_TOKEN_TTL_SECONDS', '60')),
+      heartbeatIntervalMs: parsePositiveInt('RELAY_HEARTBEAT_INTERVAL_MS', optionalEnv('RELAY_HEARTBEAT_INTERVAL_MS', '30000')),
+      heartbeatMaxMissed: parsePositiveInt('RELAY_HEARTBEAT_MAX_MISSED', optionalEnv('RELAY_HEARTBEAT_MAX_MISSED', '2')),
+      maxPayloadBytes: parsePositiveInt('RELAY_WS_MAX_PAYLOAD_BYTES', optionalEnv('RELAY_WS_MAX_PAYLOAD_BYTES', '262144')),
+    },
+    runtime: {
+      timeoutMs: parsePositiveInt('RUNTIME_TIMEOUT_MS', optionalEnv('RUNTIME_TIMEOUT_MS', '120000')),
+      maxRequestBytes: parsePositiveInt('RUNTIME_MAX_REQUEST_BYTES', optionalEnv('RUNTIME_MAX_REQUEST_BYTES', '16384')),
+      rateLimitMax: parsePositiveInt('RUNTIME_RATE_LIMIT_MAX', optionalEnv('RUNTIME_RATE_LIMIT_MAX', '30')),
+      rateLimitWindowMs: parsePositiveInt('RUNTIME_RATE_LIMIT_WINDOW_MS', optionalEnv('RUNTIME_RATE_LIMIT_WINDOW_MS', '60000')),
+    },
   };
 }

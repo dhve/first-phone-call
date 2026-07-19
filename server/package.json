@@ -1,7 +1,7 @@
 {
   "name": "host39-server",
   "version": "0.1.0",
-  "description": "host39 — A2A Agent Card hosting service API",
+  "description": "host39 A2A Agent Card hosting service API",
   "private": true,
   "type": "module",
   "engines": {
@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "migrate": "tsx --env-file=.env src/db/migrate.ts"
   },
   "dependencies": {
