@@ -77,8 +77,22 @@ export const CONVERSATION_SYSTEM_PROMPT =
  */
 export const MIN_TURNS_BEFORE_AGREEMENT = 3;
 
-/** Hard stop, so a pair of agents cannot talk forever on stage. */
-export const CONVERSATION_MAX_TURNS = 8;
+/**
+ * Backstop, not the intended ending. A conversation is meant to run until the
+ * agents agree or the user stops it; this only exists so two agents cannot
+ * talk forever unattended. The engine trims old turns to fit the context
+ * window, so a long conversation degrades rather than crashing.
+ */
+export const CONVERSATION_MAX_TURNS = 20;
+
+/**
+ * Consecutive repeated turns tolerated before giving up.
+ *
+ * One repeat is worth trying to break out of — the model is nudged to take a
+ * different angle. Two in a row means it is stuck, and continuing just prints
+ * the same sentence at the audience.
+ */
+export const MAX_CONSECUTIVE_REPEATS = 2;
 
 /** Compare two replies ignoring case, punctuation and spacing. */
 function normalize(text: string): string {
@@ -110,9 +124,30 @@ export function isEcho(reply: string, prompt: string): boolean {
   return union > 0 && shared / union >= 0.7;
 }
 
-/** Has an agent signalled it is done? */
+/**
+ * Has an agent signalled it is done?
+ *
+ * The marker alone is not enough. A small model settles the question in plain
+ * English — "I agree", "that is right" — and never reaches for the keyword, so
+ * the two of them go on restating a point they have already conceded. Ordinary
+ * agreement counts.
+ */
+const AGREEMENT_PHRASES = [
+  AGREEMENT_MARKER,
+  'i agree',
+  'we agree',
+  'fully agree',
+  'i concur',
+  'that is right',
+  "that's right",
+  'you are right',
+  "you're right",
+  'exactly right',
+];
+
 export function signalsAgreement(text: string): boolean {
-  return new RegExp(`\\b${AGREEMENT_MARKER}\\b`, 'i').test(text);
+  const t = normalize(text);
+  return AGREEMENT_PHRASES.some((p) => t.includes(normalize(p)));
 }
 
 /**

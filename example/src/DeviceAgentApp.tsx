@@ -15,6 +15,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import {
   CONVERSATION_MAX_TURNS,
+  MAX_CONSECUTIVE_REPEATS,
   MIN_TURNS_BEFORE_AGREEMENT,
   MODEL,
   isEcho,
@@ -64,7 +65,7 @@ const MODES: {
     key: 'auto',
     label: 'Let them talk',
     action: 'Start',
-    hint: 'both agents discuss it until they agree, or 8 turns',
+    hint: 'both agents discuss it until they agree — or you tap Stop',
     placeholder: 'Give them something to settle…',
     needsPeer: true,
     tint: { backgroundColor: '#7c3aed' },
@@ -216,12 +217,26 @@ export function DeviceAgentApp() {
 
     const me = `agent-${inbox.pairing.agentId}`;
     const peerName = inbox.pairing.peerName ?? 'other agent';
+    let repeats = 0;
     appendLine('tool', `🎙️  topic: ${topic}`);
 
     try {
+      // Every turn is framed as an instruction. Handing the model a bare
+      // sentence tells it nothing about what to do with it, and a small model
+      // answers that by repeating it.
       let line = await converseTurn(
-        `Another agent is on the line. Open the conversation about this, in one or two sentences: ${topic}`,
+        `You are speaking with another AI agent about this question: "${topic}". ` +
+          `State your own position in one sentence and give one reason for it. ` +
+          `Do not repeat the question back.`,
       );
+
+      // If it parroted the topic anyway, ask once more, more bluntly.
+      if (isEcho(line, topic)) {
+        line = await converseTurn(
+          `Do not repeat the question. Say what you personally think about ` +
+            `"${topic}", in one sentence, and why.`,
+        );
+      }
 
       for (let turn = 1; turn <= CONVERSATION_MAX_TURNS; turn++) {
         if (stopRef.current) {
@@ -251,13 +266,28 @@ export function DeviceAgentApp() {
         }
 
         const previous = line;
-        line = await converseTurn(res.reply);
+        line = await converseTurn(
+          `The other agent replied: "${res.reply}". Respond to that point in ` +
+            `one or two sentences, in your own words. Do not repeat what they said.`,
+        );
 
-        // Going in circles is worse than stopping. Two agents can lock onto
-        // one sentence and trade it until the cap, which reads as broken.
+        // Repeating is worth one attempt to break out of, not an immediate
+        // exit: the conversation should end because they agreed or because
+        // someone stopped it, not because the model stalled once.
         if (isEcho(line, previous) || isEcho(line, res.reply)) {
-          appendLine('tool', '🔁 they started repeating themselves — stopped');
-          return;
+          repeats += 1;
+          if (repeats >= MAX_CONSECUTIVE_REPEATS) {
+            appendLine('tool', '🔁 they kept repeating themselves — stopped');
+            return;
+          }
+          appendLine('tool', '🔁 going in circles — nudging for a new angle');
+          line = await converseTurn(
+            `You are repeating yourself. Make a different point about ` +
+              `"${topic}" in one sentence — raise something neither of you ` +
+              `has said yet.`,
+          );
+        } else {
+          repeats = 0;
         }
 
         if (turn >= MIN_TURNS_BEFORE_AGREEMENT && signalsAgreement(line)) {
