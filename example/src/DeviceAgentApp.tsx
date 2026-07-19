@@ -111,6 +111,13 @@ export function DeviceAgentApp() {
   const [conversing, setConversing] = useState(false);
   /** Lets the Stop button break the loop between turns. */
   const stopRef = useRef(false);
+  /**
+   * Serial for the caller id sent with each call or conversation. The far
+   * side keys its history on the caller string, so a fresh "#t3"/"#c7"
+   * suffix makes it start from a clean context — no leftovers from the
+   * previous conversation bleeding into this one.
+   */
+  const convSeqRef = useRef(0);
 
   const inbox = usePhoneInbox({
     relayUrl,
@@ -188,7 +195,7 @@ export function DeviceAgentApp() {
       relayUrl,
       peerId,
       message: text,
-      from: `agent-${inbox.pairing.agentId}`,
+      from: `agent-${inbox.pairing.agentId}#c${++convSeqRef.current}`,
     });
     if (res.ok) {
       appendLine('assistant', `📞 other agent: ${res.reply}`);
@@ -215,7 +222,7 @@ export function DeviceAgentApp() {
     stopRef.current = false;
     resetConversation();
 
-    const me = `agent-${inbox.pairing.agentId}`;
+    const me = `agent-${inbox.pairing.agentId}#t${++convSeqRef.current}`;
     const peerName = inbox.pairing.peerName ?? 'other agent';
     let repeats = 0;
     appendLine('tool', `🎙️  topic: ${topic}`);

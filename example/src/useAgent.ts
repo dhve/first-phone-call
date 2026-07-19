@@ -205,11 +205,12 @@ export function useAgent() {
   /**
    * Answer a message that arrived from another agent via the relay.
    *
-   * History is kept for as long as the same agent keeps calling, so a
+   * History is kept for as long as the same caller string keeps calling, so a
    * back-and-forth actually builds on itself — without that, the far side
-   * restates its opening position forever and never converges. It resets when
-   * a different caller appears, and again after enough turns that the 4k
-   * window would otherwise be at risk.
+   * restates its opening position forever and never converges. The caller
+   * string carries a per-conversation suffix ("agent-a#t3"), so every new
+   * conversation or one-off call starts from a clean context; it also resets
+   * after enough turns that the 4k window would otherwise be at risk.
    */
   const answerRemote = useCallback(async (text: string, from: string): Promise<string> => {
     const agent = remoteAgentRef.current;

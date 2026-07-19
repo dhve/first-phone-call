@@ -136,7 +136,9 @@ export function usePhoneInbox(options: InboxOptions) {
           if (cancelled) return;
 
           setStatus('answering');
-          emit(`📞 incoming from ${item.from}: "${item.message}"`);
+          // The suffix after '#' is a conversation id, plumbing rather than a
+          // name — keep it out of the transcript.
+          emit(`📞 incoming from ${item.from.replace(/#.*$/, '')}: "${item.message}"`);
 
           let reply: string;
           try {
