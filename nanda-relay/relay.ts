@@ -13,6 +13,7 @@
 import express, { type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
+import { speakTurn } from './tts.js';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -353,6 +354,29 @@ app.post('/outbox', (req: Request, res: Response) => {
 
   waiter(reply);
   res.json({ ok: true, delivered: true });
+});
+
+/**
+ * Debug: synthesize arbitrary text exactly the way a call turn would be.
+ * `curl "$RELAY/tts?text=hello" -o out.wav` is the fastest way to prove the
+ * laptop-side audio path works before any phone is involved.
+ */
+app.get('/tts', async (req: Request, res: Response) => {
+  const text = typeof req.query.text === 'string' ? req.query.text.trim() : '';
+  const lane = typeof req.query.lane === 'string' ? req.query.lane : 'a';
+  if (!text) {
+    res.status(400).json({ error: 'text query parameter is required' });
+    return;
+  }
+  try {
+    const wav = await speakTurn(text, lane);
+    log('TTS DEBUG', `lane ${lane}: "${preview(text)}" -> ${wav.length} bytes`);
+    res.setHeader('Content-Type', 'audio/wav');
+    res.send(wav);
+  } catch (e) {
+    log('TTS FAILED', `${(e as Error).message}`);
+    res.status(502).json({ error: `tts failed: ${(e as Error).message}` });
+  }
 });
 
 /** Last 50 events, for the demo screen. */
