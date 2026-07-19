@@ -21,6 +21,8 @@ export interface ChatOptions {
   toolChoice?: 'auto' | 'none' | 'required';
   temperature?: number;
   n_predict?: number;
+  /** Sampler seed. Defaults to fresh entropy per completion. */
+  seed?: number;
   stop?: string[];
   /**
    * Abort signal for this completion. When it fires, the active llama.rn
@@ -110,6 +112,12 @@ export class LlamaEngine {
           temperature: options.temperature ?? 0.7,
           n_predict: options.n_predict ?? 512,
           stop: options.stop,
+          // llama.cpp's sampler is deterministic for a fixed seed, and the
+          // native default is a constant: two devices given the same prompt
+          // then speak the exact same sentence, which turns an agent-to-agent
+          // conversation into an echo chamber. Fresh entropy per completion
+          // unless the caller pins one for reproducibility.
+          seed: options.seed ?? Math.floor(Math.random() * 0x7fffffff),
         },
         (data: { token?: string }) => {
           if (options.onToken && typeof data?.token === 'string') options.onToken(data.token);

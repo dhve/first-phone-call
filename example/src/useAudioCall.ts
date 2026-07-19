@@ -90,6 +90,11 @@ export function useAudioCall(options: UseAudioCallOptions) {
     role: 'caller' | 'callee';
     topic: string | null;
     myTurns: number;
+    heardTurns: number;
+    /** My previous line, for the self-repeat guard. */
+    lastLine: string | null;
+    /** Consecutive turns where I repeated myself despite a nudge. */
+    stuck: number;
     ending: boolean;
   } | null>(null);
 
@@ -141,6 +146,9 @@ export function useAudioCall(options: UseAudioCallOptions) {
         role: 'caller',
         topic,
         myTurns: 0,
+        heardTurns: 0,
+        lastLine: null,
+        stuck: 0,
         ending: false,
       };
       setCall({ ...IDLE, phase: 'dialing', sessionId: String(body.sessionId) });
@@ -224,11 +232,15 @@ export function useAudioCall(options: UseAudioCallOptions) {
     setCall((c) => ({ ...c, phase: 'active', activeState: 'thinking' }));
     emit('☎️  they picked up');
     resetConversation();
-    const line = await converseRef.current(
-      `You're opening a phone call with another AI agent about: "${session.topic}". ` +
-        `Say what you think and why, the way you'd say it to a colleague - ` +
-        `one or two short sentences. Don't repeat the question back.`,
+    const line = sanitizeSpokenLine(
+      await converseRef.current(
+        `You are opening a phone call with another AI agent. The topic is: ` +
+          `${session.topic}\nState your own opinion on it. Start with "I think" ` +
+          `and give one concrete reason. One or two short sentences. Do not ` +
+          `repeat the topic as a question and do not greet them.`,
+      ),
     );
+    session.lastLine = line;
     emit(`🗣 me: ${line}`);
     await sendTurn(line);
   }, [resetConversation, sendTurn]);
@@ -285,18 +297,44 @@ export function useAudioCall(options: UseAudioCallOptions) {
       }
 
       setCall((c) => ({ ...c, activeState: 'thinking' }));
-      let reply = await converseRef.current(
-        `The other agent says: "${heard}". Reply as yourself in one or two ` +
-          `casual sentences. Answer what they actually asked; if they ask you ` +
-          `to choose between things, pick one and give a quick reason - never ` +
-          `refuse, never offer help with tasks.`,
-      );
-      if (isEcho(reply, heard)) {
-        reply = await converseRef.current(
-          `You just repeated them. Say something NEW about it - a different ` +
-            `angle, an example, or a question back. One or two sentences.`,
+      session.heardTurns += 1;
+      // The first heard turn gets extra context: without it a small model
+      // answers a phone call the way an assistant greets a customer, and the
+      // two of them trade "I'm ready, let's begin" until the turn cap.
+      const frame =
+        session.heardTurns === 1 && session.role === 'callee'
+          ? `On a phone call, the other agent just told you: ${heard}\n` +
+            `State your own opinion about that. Start your reply with "I think" ` +
+            `or "Honestly," and give one concrete reason. One or two short ` +
+            `sentences. Do not repeat their words, do not introduce yourself, ` +
+            `do not say you are ready or offer to help.`
+          : `They just told you: ${heard}\n` +
+            `React with your own view in one or two short sentences: agree or ` +
+            `disagree and say why, or answer their question directly with a ` +
+            `concrete pick. Do not repeat their words back.`;
+      let reply = sanitizeSpokenLine(await converseRef.current(frame));
+      if (isEcho(reply, heard) || (session.lastLine && isEcho(reply, session.lastLine))) {
+        reply = sanitizeSpokenLine(
+          await converseRef.current(
+            `You are repeating yourself. Say something NEW - a different ` +
+              `angle, a concrete example, or a question back. One or two ` +
+              `sentences, and do not reuse your previous wording.`,
+          ),
         );
       }
+      // Still circling after the nudge means the model is stuck; a call that
+      // loops the same sentence at the audience is worse than one that ends.
+      if (session.lastLine && isEcho(reply, session.lastLine)) {
+        session.stuck += 1;
+        if (session.stuck >= 2) {
+          emit('🔁 going in circles; hanging up');
+          await hangUp('going-in-circles');
+          return;
+        }
+      } else {
+        session.stuck = 0;
+      }
+      session.lastLine = reply;
 
       emit(`🗣 me: ${reply}`);
       await sendTurn(reply);
@@ -324,7 +362,16 @@ export function useAudioCall(options: UseAudioCallOptions) {
             emit('📵 missed a call: models are not ready');
             return;
           }
-          sessionRef.current = { id: item.sessionId, role: 'callee', topic: null, myTurns: 0, ending: false };
+          sessionRef.current = {
+            id: item.sessionId,
+            role: 'callee',
+            topic: null,
+            myTurns: 0,
+            heardTurns: 0,
+            lastLine: null,
+            stuck: 0,
+            ending: false,
+          };
           setCall({
             ...IDLE,
             phase: 'ringing',
@@ -380,6 +427,21 @@ export function useAudioCall(options: UseAudioCallOptions) {
   }, [pairing?.agentId, toIdle]);
 
   return { call, dial, answer, hangUp, onCallItem };
+}
+
+/**
+ * What goes into TTS must read like speech. Gemma loves to wrap its whole
+ * reply in quotation marks; spoken aloud those arrive as literal quotes in
+ * the transcription and push the far model into echo mode.
+ */
+function sanitizeSpokenLine(text: string): string {
+  let t = text.trim();
+  const wrapped =
+    (t.startsWith('"') && t.endsWith('"')) ||
+    (t.startsWith('“') && t.endsWith('”')) ||
+    (t.startsWith("'") && t.endsWith("'"));
+  if (wrapped && t.length > 2) t = t.slice(1, -1).trim();
+  return t.replace(/\s+/g, ' ').trim() || text.trim();
 }
 
 /** Play a WAV to the speaker; resolve when it finishes (or errors out). */

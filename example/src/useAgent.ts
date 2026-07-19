@@ -137,6 +137,9 @@ export function useAgent() {
         engine,
         systemPrompt: CONVERSATION_SYSTEM_PROMPT,
         maxTokens: REMOTE_MAX_TOKENS,
+        // A tiny model at default temperature parrots its prompt; running the
+        // sampler hotter is what gets it to produce a take of its own.
+        temperature: 0.9,
       });
       setStatus('ready');
     } catch (e) {
