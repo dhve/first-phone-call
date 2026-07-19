@@ -27,6 +27,7 @@ export function createNetworkTools(options: NetworkToolOptions = {}): Tool[] {
       'Use for calling web APIs or fetching public data.',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         url: { type: 'string', description: 'Full URL including https://' },
         method: { type: 'string', description: 'HTTP method, default GET', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] },

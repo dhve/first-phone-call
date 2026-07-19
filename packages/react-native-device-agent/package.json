@@ -14,7 +14,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build": "echo 'TODO: react-native-builder-bob before publish' && tsc --noEmit"
+    "build": "tsc --noEmit"
   },
   "keywords": [
     "react-native",
@@ -27,7 +27,7 @@
     "tool-calling",
     "function-calling"
   ],
-  "license": "MIT",
+  "license": "UNLICENSED",
   "peerDependencies": {
     "llama.rn": "*",
     "react": "*",

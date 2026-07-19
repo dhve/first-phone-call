@@ -21,6 +21,7 @@ export function createFilesystemTools(opts: { baseDir?: unknown } = {}): Tool[] 
     description: 'Write text content to a file in the app sandbox (overwrites).',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         path: { type: 'string', description: 'Relative file path, e.g. "notes/todo.txt"' },
         content: { type: 'string', description: 'Text to write' },
@@ -42,6 +43,7 @@ export function createFilesystemTools(opts: { baseDir?: unknown } = {}): Tool[] 
     description: 'Read text content from a file in the app sandbox.',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: { path: { type: 'string', description: 'Relative file path' } },
       required: ['path'],
     },
@@ -57,6 +59,7 @@ export function createFilesystemTools(opts: { baseDir?: unknown } = {}): Tool[] 
     description: 'List files and folders in a directory inside the app sandbox.',
     parameters: {
       type: 'object',
+      additionalProperties: false,
       properties: { path: { type: 'string', description: 'Relative directory path, default root' } },
     },
     execute: async ({ path = '' }) => {

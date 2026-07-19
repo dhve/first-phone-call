@@ -14,7 +14,7 @@ export function createClipboardTools(): Tool[] {
     defineTool({
       name: 'get_clipboard',
       description: 'Read the current text contents of the device clipboard.',
-      parameters: { type: 'object', properties: {} },
+      parameters: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => ({ text: await Clipboard.getStringAsync() }),
     }),
     defineTool<{ text: string }>({
@@ -22,6 +22,7 @@ export function createClipboardTools(): Tool[] {
       description: 'Copy text to the device clipboard.',
       parameters: {
         type: 'object',
+        additionalProperties: false,
         properties: { text: { type: 'string', description: 'Text to copy' } },
         required: ['text'],
       },
@@ -40,7 +41,7 @@ export function createLocationTools(): Tool[] {
     defineTool({
       name: 'get_current_location',
       description: 'Get the device current GPS coordinates (latitude/longitude).',
-      parameters: { type: 'object', properties: {} },
+      parameters: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') throw new Error('Location permission denied');
@@ -64,6 +65,7 @@ export function createNotificationTools(): Tool[] {
       description: 'Schedule a local notification/reminder after a delay.',
       parameters: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           title: { type: 'string', description: 'Notification title' },
           body: { type: 'string', description: 'Notification body text' },
@@ -93,6 +95,7 @@ export function createContactsTools(): Tool[] {
       description: 'Search the device contacts by name. Returns names and phone numbers.',
       parameters: {
         type: 'object',
+        additionalProperties: false,
         properties: { query: { type: 'string', description: 'Name to search for' } },
         required: ['query'],
       },
@@ -135,6 +138,7 @@ export function createCalendarTools(): Tool[] {
       description: 'List upcoming calendar events within the next N days (default 7).',
       parameters: {
         type: 'object',
+        additionalProperties: false,
         properties: { daysAhead: { type: 'number', description: 'Days ahead to look' } },
       },
       execute: async ({ daysAhead = 7 }) => {
@@ -158,6 +162,7 @@ export function createCalendarTools(): Tool[] {
       description: 'Create a calendar event. Times must be ISO 8601 strings.',
       parameters: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           title: { type: 'string', description: 'Event title' },
           startISO: { type: 'string', description: 'Start time, ISO 8601' },

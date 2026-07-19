@@ -10,7 +10,9 @@ directly.
 - Imported commit: `30ca528` (main, July 2026)
 - Excluded from import: the upstream demo application (`example/`)
 - Upstream had no LICENSE file and no test suite at the imported commit; tests
-  added here are original to this repository.
+  added here are original to this repository. Because upstream ships no
+  license grant, this package declares "UNLICENSED" and must remain private
+  until upstream adds a license we can inherit.
 
 There is intentionally no publishing, submodule, or synchronization machinery
 for this copy. If a future upstream release ships through a package manager
