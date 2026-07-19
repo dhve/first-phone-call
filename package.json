@@ -2,6 +2,7 @@
   "name": "host39",
   "version": "0.2.0",
   "private": true,
+  "license": "MIT",
   "description": "host39 phone agent monorepo: server, web dashboard, Android app, and internal Device Agent package, plus a standalone example demo app for the device-agent harness.",
   "engines": {
     "node": ">=20.19.0"
