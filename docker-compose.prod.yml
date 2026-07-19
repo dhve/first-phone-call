@@ -1,12 +1,12 @@
-# host39 — production stack
+# host39: production stack
 #
 # Prerequisites:
-#   1. cp .env.prod.example .env.prod — fill in all values
+#   1. cp .env.prod.example .env.prod: fill in all values
 #   2. docker compose -f docker-compose.prod.yml --env-file .env.prod up --build -d
 #
 # Caddy exposes:
 #   :80  → HTTP (redirects to HTTPS automatically)
-#   :443 → agentcards.host39.org
+#   :443 → host39.org (dashboard + API) and agentcards.host39.org (cards + A2A runtime)
 
 services:
 
@@ -27,8 +27,9 @@ services:
 
   server:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      # Context is the repo root: the workspace lockfile lives there (see server/Dockerfile)
+      context: .
+      dockerfile: server/Dockerfile
     environment:
       NODE_ENV: production
       PORT: 3010
@@ -40,6 +41,19 @@ services:
       # Baked into /.well-known/ai-catalog.json entries and each card's
       # _meta.publicUrl, so it must NOT default to localhost in production.
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      # Phone relay. RELAY_PUBLIC_URL is the WebSocket URL handed to phones;
+      # when left blank it derives from PUBLIC_BASE_URL as wss://<host>/relay
+      # (Caddyfile.prod proxies /relay on that host).
+      RELAY_PUBLIC_URL: ${RELAY_PUBLIC_URL:-}
+      RELAY_TOKEN_TTL_SECONDS: ${RELAY_TOKEN_TTL_SECONDS:-60}
+      RELAY_HEARTBEAT_INTERVAL_MS: ${RELAY_HEARTBEAT_INTERVAL_MS:-30000}
+      RELAY_HEARTBEAT_MAX_MISSED: ${RELAY_HEARTBEAT_MAX_MISSED:-2}
+      RELAY_WS_MAX_PAYLOAD_BYTES: ${RELAY_WS_MAX_PAYLOAD_BYTES:-262144}
+      # A2A runtime for phone-hosted agents
+      RUNTIME_TIMEOUT_MS: ${RUNTIME_TIMEOUT_MS:-120000}
+      RUNTIME_MAX_REQUEST_BYTES: ${RUNTIME_MAX_REQUEST_BYTES:-16384}
+      RUNTIME_RATE_LIMIT_MAX: ${RUNTIME_RATE_LIMIT_MAX:-30}
+      RUNTIME_RATE_LIMIT_WINDOW_MS: ${RUNTIME_RATE_LIMIT_WINDOW_MS:-60000}
     depends_on:
       db:
         condition: service_healthy
@@ -47,8 +61,9 @@ services:
 
   web:
     build:
-      context: ./web
-      dockerfile: Dockerfile
+      # Context is the repo root: the workspace lockfile lives there (see web/Dockerfile)
+      context: .
+      dockerfile: web/Dockerfile
       args:
         NEXT_PUBLIC_HOST39_API_URL: ${NEXT_PUBLIC_HOST39_API_URL}
         NEXT_PUBLIC_HOST39_CARDS_URL: ${NEXT_PUBLIC_HOST39_CARDS_URL}

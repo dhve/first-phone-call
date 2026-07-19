@@ -18,6 +18,7 @@ describe('relay envelope protocol', () => {
       type: 'request',
       id: 'req-1',
       method: 'message/send',
+      slug: 'phone-agent',
       params: { message: { parts: [{ kind: 'text', text: 'hi' }] } },
       deadline: 1_760_000_120_000,
     });
@@ -46,13 +47,17 @@ describe('relay envelope protocol', () => {
     expect(decodeEnvelope(JSON.stringify({ type: 'ping' }))).toMatchObject({ ok: false });
     expect(decodeEnvelope(JSON.stringify({ type: 'pong', ts: 'now' }))).toMatchObject({ ok: false });
     expect(
-      decodeEnvelope(JSON.stringify({ type: 'request', id: 'r', method: 'tasks/get', params: {}, deadline: 1 })),
+      decodeEnvelope(
+        JSON.stringify({ type: 'request', id: 'r', method: 'tasks/get', slug: 's', params: {}, deadline: 1 }),
+      ),
     ).toMatchObject({ ok: false });
     expect(
-      decodeEnvelope(JSON.stringify({ type: 'request', id: 'r', method: 'message/send', deadline: 1 })),
+      decodeEnvelope(JSON.stringify({ type: 'request', id: 'r', method: 'message/send', slug: 's', deadline: 1 })),
     ).toMatchObject({ ok: false });
     expect(
-      decodeEnvelope(JSON.stringify({ type: 'request', id: '', method: 'message/send', params: {}, deadline: 1 })),
+      decodeEnvelope(
+        JSON.stringify({ type: 'request', id: '', method: 'message/send', slug: 's', params: {}, deadline: 1 }),
+      ),
     ).toMatchObject({ ok: false });
     expect(decodeEnvelope(JSON.stringify({ type: 'response', id: 'r' }))).toMatchObject({ ok: false });
     expect(decodeEnvelope(JSON.stringify({ type: 'response', result: {} }))).toMatchObject({ ok: false });
@@ -60,6 +65,17 @@ describe('relay envelope protocol', () => {
       ok: false,
     });
     expect(decodeEnvelope(JSON.stringify({ type: 'error', id: 'r', code: 1 }))).toMatchObject({ ok: false });
+  });
+
+  it('rejects request envelopes without a valid slug', () => {
+    const base = { type: 'request', id: 'r', method: 'message/send', params: {}, deadline: 1 };
+    expect(decodeEnvelope(JSON.stringify(base))).toMatchObject({
+      ok: false,
+      error: 'request requires a string slug',
+    });
+    expect(decodeEnvelope(JSON.stringify({ ...base, slug: '' }))).toMatchObject({ ok: false });
+    expect(decodeEnvelope(JSON.stringify({ ...base, slug: 42 }))).toMatchObject({ ok: false });
+    expect(decodeEnvelope(JSON.stringify({ ...base, slug: 'phone-agent' }))).toMatchObject({ ok: true });
   });
 
   it('preserves the response result payload exactly', () => {

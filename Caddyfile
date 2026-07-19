@@ -14,6 +14,23 @@ agentcards.host39.org {
   handle /personal/* {
     reverse_proxy localhost:3010
   }
+  handle /devices/* {
+    reverse_proxy localhost:3010
+  }
+  handle /mobile/* {
+    reverse_proxy localhost:3010
+  }
+  # Device relay WebSocket (reverse_proxy passes the upgrade through)
+  handle /relay {
+    reverse_proxy localhost:3010
+  }
+  # A2A JSON-RPC runtime for phone-hosted agents
+  handle /a2a/* {
+    reverse_proxy localhost:3010
+  }
+  handle /health {
+    reverse_proxy localhost:3010
+  }
   # Domain-based agent card routes: /:domain/:slug.json
   handle /* {
     @agentcard path_regexp ^/[a-z0-9][a-z0-9.-]*/[a-z0-9][a-z0-9-]*\.json$

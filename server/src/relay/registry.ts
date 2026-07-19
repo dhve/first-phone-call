@@ -154,7 +154,7 @@ export class RelayRegistry {
    * its response. Rejects with RelayRequestError (busy, unavailable,
    * timeout) or RelayAgentError (phone replied with an error envelope).
    */
-  async request(deviceId: string, params: unknown, timeoutMs: number): Promise<unknown> {
+  async request(deviceId: string, slug: string, params: unknown, timeoutMs: number): Promise<unknown> {
     const connection = this.connections.get(deviceId);
     if (!connection) throw new RelayRequestError('unavailable');
     if (connection.pending) throw new RelayRequestError('busy');
@@ -174,6 +174,7 @@ export class RelayRegistry {
         type: 'request',
         id,
         method: 'message/send',
+        slug,
         params,
         deadline: Date.now() + timeoutMs,
       });

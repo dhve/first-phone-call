@@ -45,6 +45,8 @@ export interface RequestEnvelope {
   type: 'request';
   id: string;
   method: 'message/send';
+  /** Card slug the request is addressed to; the phone rejects slugs it has not published. */
+  slug: string;
   params: unknown;
   /** Unix epoch ms after which the server no longer accepts a response. */
   deadline: number;
@@ -121,6 +123,9 @@ export function decodeEnvelope(raw: string): EnvelopeDecodeResult {
       }
       if (obj.method !== 'message/send') {
         return { ok: false, error: 'request method must be "message/send"' };
+      }
+      if (typeof obj.slug !== 'string' || obj.slug === '') {
+        return { ok: false, error: 'request requires a string slug' };
       }
       if (typeof obj.deadline !== 'number') {
         return { ok: false, error: 'request requires a numeric deadline' };

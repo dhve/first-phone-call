@@ -4,6 +4,7 @@ import { parsePersonalUrn } from '../urn.js';
 
 export type CardUploadRejection =
   | { code: 'INVALID_CARD'; detail: string }
+  | { code: 'CARD_VERSION_MISMATCH'; detail: string }
   | { code: 'STALE_VERSION'; detail: string }
   | { code: 'IDENTITY_MISMATCH'; detail: string }
   | { code: 'INVALID_SIGNATURE'; detail: string };
@@ -19,6 +20,8 @@ export interface CardUploadInput {
   storedVersion: number | null;
   /** The device's registered ES256 public JWK. */
   publicKeyJwk: unknown;
+  /** Public base URL cards are served from; the card's url must point at its A2A runtime here. */
+  publicBaseUrl: string;
 }
 
 export type CardUploadResult =
@@ -36,20 +39,35 @@ export function extractCardUrn(card: Record<string, unknown>): string | null {
   return null;
 }
 
+/** Public A2A runtime URL a published card must advertise for (email, slug). */
+export function buildRuntimeUrl(publicBaseUrl: string, email: string, slug: string): string {
+  return `${publicBaseUrl}/a2a/personal/${encodeURIComponent(email)}/${slug}`;
+}
+
 /**
  * Validates a signed card upload: version must be strictly greater than
- * the stored one, the card URN must match the account email and slug,
- * and the ES256 signature must verify over the canonicalized card JSON
- * with the device's registered key.
+ * the stored one and echoed inside the signed card, the card URN must
+ * match the account email and slug, the card url must advertise the
+ * public A2A runtime URL, and the ES256 signature must verify over the
+ * canonicalized card JSON with the device's registered key.
  */
 export function validateCardUpload(input: CardUploadInput): CardUploadResult {
-  const { card, signature, version, slug, accountEmail, storedVersion, publicKeyJwk } = input;
+  const { card, signature, version, slug, accountEmail, storedVersion, publicKeyJwk, publicBaseUrl } = input;
 
   if (typeof card !== 'object' || card === null || Array.isArray(card)) {
     return { ok: false, rejection: { code: 'INVALID_CARD', detail: 'card must be a JSON object' } };
   }
   if (!Number.isInteger(version) || version < 1) {
     return { ok: false, rejection: { code: 'INVALID_CARD', detail: 'version must be a positive integer' } };
+  }
+  if ((card as Record<string, unknown>).version !== version) {
+    return {
+      ok: false,
+      rejection: {
+        code: 'CARD_VERSION_MISMATCH',
+        detail: `card.version must be present and strictly equal the upload version ${version}`,
+      },
+    };
   }
   if (storedVersion !== null && version <= storedVersion) {
     return {
@@ -79,6 +97,19 @@ export function validateCardUpload(input: CardUploadInput): CardUploadResult {
     return {
       ok: false,
       rejection: { code: 'IDENTITY_MISMATCH', detail: 'card URN slug does not match the requested slug' },
+    };
+  }
+
+  // Every published signed card must advertise its own A2A runtime URL.
+  // The canonical handle is the URI-encoded email; the raw-email spelling
+  // is also accepted since both address the same runtime route.
+  const runtimeUrl = buildRuntimeUrl(publicBaseUrl, accountEmail, slug);
+  const rawHandleRuntimeUrl = `${publicBaseUrl}/a2a/personal/${accountEmail}/${slug}`;
+  const cardUrl = (card as Record<string, unknown>).url;
+  if (cardUrl !== runtimeUrl && cardUrl !== rawHandleRuntimeUrl) {
+    return {
+      ok: false,
+      rejection: { code: 'INVALID_CARD', detail: `card.url must be the public runtime URL ${runtimeUrl}` },
     };
   }
 

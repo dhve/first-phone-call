@@ -104,7 +104,7 @@ describe('RelayRegistry', () => {
 
   it('rejects requests to a device that is not connected', async () => {
     const registry = makeRegistry();
-    await expect(registry.request('nobody', {}, 1000)).rejects.toMatchObject({
+    await expect(registry.request('nobody', 'phone-agent', {}, 1000)).rejects.toMatchObject({
       name: 'RelayRequestError',
       reason: 'unavailable',
     });
@@ -116,10 +116,10 @@ describe('RelayRegistry', () => {
     registry.attach('dev-1', socket);
 
     const params = { message: { parts: [{ kind: 'text', text: 'hi' }] } };
-    const pending = registry.request('dev-1', params, 120_000);
+    const pending = registry.request('dev-1', 'phone-agent', params, 120_000);
 
     const requestFrame = frames(socket).find((f) => f.type === 'request');
-    expect(requestFrame).toMatchObject({ method: 'message/send', params });
+    expect(requestFrame).toMatchObject({ method: 'message/send', slug: 'phone-agent', params });
     expect(typeof requestFrame?.deadline).toBe('number');
 
     registry.handleMessage(
@@ -136,8 +136,8 @@ describe('RelayRegistry', () => {
     const socket = fakeSocket();
     registry.attach('dev-1', socket);
 
-    const first = registry.request('dev-1', {}, 120_000);
-    await expect(registry.request('dev-1', {}, 120_000)).rejects.toMatchObject({ reason: 'busy' });
+    const first = registry.request('dev-1', 'phone-agent', {}, 120_000);
+    await expect(registry.request('dev-1', 'phone-agent', {}, 120_000)).rejects.toMatchObject({ reason: 'busy' });
 
     const requestFrame = frames(socket).find((f) => f.type === 'request');
     registry.handleMessage(
@@ -147,7 +147,7 @@ describe('RelayRegistry', () => {
     await expect(first).resolves.toBe('ok');
 
     // After the first settles, a new request is accepted again
-    const second = registry.request('dev-1', {}, 120_000);
+    const second = registry.request('dev-1', 'phone-agent', {}, 120_000);
     const secondFrame = frames(socket).filter((f) => f.type === 'request')[1];
     registry.handleMessage(
       'dev-1',
@@ -163,14 +163,14 @@ describe('RelayRegistry', () => {
     const socket = fakeSocket();
     registry.attach('dev-1', socket);
 
-    const pending = registry.request('dev-1', {}, 120_000);
+    const pending = registry.request('dev-1', 'phone-agent', {}, 120_000);
     const assertion = expect(pending).rejects.toMatchObject({ reason: 'timeout' });
     await vi.advanceTimersByTimeAsync(120_000);
     await assertion;
 
     // The slot frees up after the timeout: a new request is not rejected
     // with busy, it times out on its own
-    const second = registry.request('dev-1', {}, 1000);
+    const second = registry.request('dev-1', 'phone-agent', {}, 1000);
     const secondAssertion = expect(second).rejects.toMatchObject({ reason: 'timeout' });
     await vi.advanceTimersByTimeAsync(1000);
     await secondAssertion;
@@ -182,7 +182,7 @@ describe('RelayRegistry', () => {
     const socket = fakeSocket();
     registry.attach('dev-1', socket);
 
-    const pending = registry.request('dev-1', {}, 120_000);
+    const pending = registry.request('dev-1', 'phone-agent', {}, 120_000);
     const requestFrame = frames(socket).find((f) => f.type === 'request');
     registry.handleMessage(
       'dev-1',
@@ -202,7 +202,7 @@ describe('RelayRegistry', () => {
     const socket = fakeSocket();
     registry.attach('dev-1', socket);
 
-    const pending = registry.request('dev-1', {}, 60_000);
+    const pending = registry.request('dev-1', 'phone-agent', {}, 60_000);
     registry.handleMessage('dev-1', encodeEnvelope({ type: 'response', id: 'wrong-id', result: 'nope' }));
 
     const assertion = expect(pending).rejects.toMatchObject({ reason: 'timeout' });
@@ -216,7 +216,7 @@ describe('RelayRegistry', () => {
     const socket = fakeSocket();
     registry.attach('dev-1', socket);
 
-    const pending = registry.request('dev-1', {}, 120_000);
+    const pending = registry.request('dev-1', 'phone-agent', {}, 120_000);
     registry.detach('dev-1', socket);
 
     await expect(pending).rejects.toMatchObject({ reason: 'unavailable' });

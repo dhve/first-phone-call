@@ -1,4 +1,4 @@
-# host39.org — dashboard and API (same origin = no CORS issues)
+# host39.org: dashboard and API (same origin = no CORS issues)
 host39.org {
   # Auth + card management API → backend
   handle /auth/* {
@@ -11,16 +11,56 @@ host39.org {
     reverse_proxy server:3010
   }
 
+  # Phone device registration + relay sessions → backend
+  handle /devices/* {
+    reverse_proxy server:3010
+  }
+  # Device-facing signed card cache uploads → backend
+  handle /mobile/* {
+    reverse_proxy server:3010
+  }
+  # Device relay WebSocket (reverse_proxy passes the upgrade through)
+  handle /relay {
+    reverse_proxy server:3010
+  }
+  # A2A JSON-RPC runtime for phone-hosted agents
+  handle /a2a/* {
+    reverse_proxy server:3010
+  }
+  # API health check
+  handle /health {
+    reverse_proxy server:3010
+  }
+
   # Everything else → Next.js frontend
   handle {
     reverse_proxy web:3002
   }
 }
 
-# agentcards.host39.org — public card JSON serving only
+# agentcards.host39.org: public card JSON serving + A2A runtime
+# (this host is PUBLIC_BASE_URL, so card urls and the derived
+# RELAY_PUBLIC_URL default point here)
 agentcards.host39.org {
   # Personal agent cards: /personal/john@hotmail.com/card.json
   handle /personal/* {
+    reverse_proxy server:3010
+  }
+
+  # A2A runtime URLs advertised by published cards:
+  # /a2a/personal/<handle>/<slug>
+  handle /a2a/* {
+    reverse_proxy server:3010
+  }
+
+  # Device relay WebSocket; RELAY_PUBLIC_URL defaults to
+  # wss://<PUBLIC_BASE_URL host>/relay (reverse_proxy passes the upgrade through)
+  handle /relay {
+    reverse_proxy server:3010
+  }
+
+  # API health check
+  handle /health {
     reverse_proxy server:3010
   }
 

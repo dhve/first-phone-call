@@ -1,0 +1,12 @@
+# server/Dockerfile and web/Dockerfile build with the repo root as context
+# (single npm-workspaces lockfile). Keep that context small and make sure
+# host build artifacts never leak into the images.
+.git
+**/node_modules
+**/.next
+server/dist
+.env*
+# Only the workspace manifest is needed from mobile
+mobile/*
+!mobile/package.json
+patches

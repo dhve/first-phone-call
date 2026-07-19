@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { getSql } from '../db/client.js';
+import { buildConfig } from '../config.js';
 import { validateCardUpload } from '../relay/cardCache.js';
 import type { DbDevice } from '../types.js';
 
@@ -20,6 +21,7 @@ interface CacheCardBody {
 
 export async function registerMobileRoutes(fastify: FastifyInstance): Promise<void> {
   const sql = getSql();
+  const config = buildConfig();
 
   // PUT /mobile/cards/:slug/cache - store a canonical signed agent card
   fastify.put<{ Params: { slug: string }; Body: CacheCardBody }>(
@@ -86,6 +88,7 @@ export async function registerMobileRoutes(fastify: FastifyInstance): Promise<vo
         accountEmail: email,
         storedVersion,
         publicKeyJwk: device.publicKeyJwk,
+        publicBaseUrl: config.publicBaseUrl,
       });
 
       if (!result.ok) {

@@ -12,6 +12,27 @@ export async function registerA2ARoutes(fastify: FastifyInstance, registry: Rela
   fastify.post<{ Params: { handle: string; slug: string }; Body: unknown }>(
     '/a2a/personal/:handle/:slug',
     {
+      // Cap the full raw JSON-RPC body, not just the concatenated text parts.
+      bodyLimit: config.runtime.maxRequestBytes,
+      // Body-parser failures (oversized, malformed JSON) bypass the handler,
+      // so map them to JSON-RPC errors here instead of the app error shape.
+      errorHandler: (error, request, reply) => {
+        request.log.error({ err: error, url: request.url }, 'a2a request error');
+        if (error.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+          return reply
+            .code(A2A_ERRORS.oversized.httpStatus)
+            .send(jsonRpcError(null, A2A_ERRORS.oversized,
+              `request body exceeds ${config.runtime.maxRequestBytes} bytes`));
+        }
+        if ((error.statusCode ?? 500) < 500) {
+          return reply
+            .code(A2A_ERRORS.parse.httpStatus)
+            .send(jsonRpcError(null, A2A_ERRORS.parse, 'request body is not a valid JSON object'));
+        }
+        return reply
+          .code(A2A_ERRORS.internal.httpStatus)
+          .send(jsonRpcError(null, A2A_ERRORS.internal));
+      },
       config: {
         rateLimit: {
           max: config.runtime.rateLimitMax,
@@ -66,7 +87,7 @@ export async function registerA2ARoutes(fastify: FastifyInstance, registry: Rela
       }
 
       try {
-        const result = await registry.request(cached.deviceId, validation.request.params, config.runtime.timeoutMs);
+        const result = await registry.request(cached.deviceId, slug, validation.request.params, config.runtime.timeoutMs);
         return reply.send({ jsonrpc: '2.0', id: rpcId, result });
       } catch (err) {
         const mapped = mapRelayError(err);

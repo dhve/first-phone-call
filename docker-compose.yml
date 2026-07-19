@@ -15,7 +15,8 @@ services:
       retries: 5
 
   server:
-    build: { context: ./server, dockerfile: Dockerfile }
+    # Context is the repo root: the workspace lockfile lives there (see server/Dockerfile)
+    build: { context: ., dockerfile: server/Dockerfile }
     environment:
       # This is the local dev stack, so run as development: the shipped default
       # JWT_SECRET is accepted (the production guards reject it) and logs are
@@ -36,8 +37,9 @@ services:
 
   web:
     build:
-      context: ./web
-      dockerfile: Dockerfile
+      # Context is the repo root: the workspace lockfile lives there (see web/Dockerfile)
+      context: .
+      dockerfile: web/Dockerfile
       args:
         NEXT_PUBLIC_HOST39_API_URL: ${NEXT_PUBLIC_HOST39_API_URL:-http://localhost:3010}
         NEXT_PUBLIC_HOST39_CARDS_URL: ${NEXT_PUBLIC_HOST39_CARDS_URL:-http://localhost:3010}
