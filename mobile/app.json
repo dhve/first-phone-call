@@ -9,13 +9,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "ai.host39.mobile",
-      "infoPlist": {
-        "NSContactsUsageDescription": "Lets the on-device agent look up your contacts when you ask it to.",
-        "NSCalendarsUsageDescription": "Lets the on-device agent read and create calendar events when you ask it to.",
-        "NSCalendarsFullAccessUsageDescription": "Lets the on-device agent read and create calendar events when you ask it to.",
-        "NSLocationWhenInUseUsageDescription": "Lets the on-device agent answer questions about your current location."
-      }
+      "bundleIdentifier": "ai.host39.mobile"
     },
     "android": {
       "package": "ai.host39.mobile",
@@ -27,11 +21,11 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.READ_CONTACTS",
-        "android.permission.READ_CALENDAR",
-        "android.permission.WRITE_CALENDAR",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC"
       ]
     },
     "web": {
@@ -53,15 +47,11 @@
           },
           "android": {
             "minSdkVersion": 26,
-            "extraProguardRules": "-keep class com.rnllama.** { *; }"
+            "extraProguardRules": "-keep class com.rnllama.** { *; }\n-keep class ai.host39.mobile.host39native.** { *; }"
           }
         }
       ],
-      "expo-dev-client",
-      "expo-notifications",
-      "expo-contacts",
-      "expo-calendar",
-      "expo-location"
+      "expo-dev-client"
     ]
   }
 }
