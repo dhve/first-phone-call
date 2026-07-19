@@ -1,0 +1,20 @@
+{
+  "name": "nanda-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Store-and-forward mailbox between the public internet and a phone-hosted agent.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx relay.ts",
+    "dev": "tsx watch relay.ts"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
