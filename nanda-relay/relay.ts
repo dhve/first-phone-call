@@ -19,7 +19,17 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 const PUBLIC_URL = (process.env.PUBLIC_URL ?? `http://localhost:${PORT}`).replace(/\/+$/, '');
 const AGENT_NAME = process.env.AGENT_NAME ?? 'Phone Agent';
 /** How long POST /run waits for the phone before giving up. */
-const RUN_TIMEOUT_MS = Number(process.env.RUN_TIMEOUT_MS ?? 60_000);
+const RUN_TIMEOUT_MS = Number(process.env.RUN_TIMEOUT_MS ?? 120_000);
+/**
+ * How long a message may sit with a device before it is offered again.
+ *
+ * A phone that is killed mid-inference — which happens on a memory-tight
+ * device holding a model — takes the message with it. Without this the call is
+ * simply lost: the relay has marked it handed out, so nothing ever gives it to
+ * the phone that comes back, and the caller waits out the full timeout for a
+ * reply nobody is still working on.
+ */
+const REQUEUE_AFTER_MS = Number(process.env.REQUEUE_AFTER_MS ?? 40_000);
 
 // ---------------------------------------------------------------------------
 // State
@@ -35,6 +45,8 @@ interface Call {
   to: string;
   status: CallStatus;
   receivedAt: number;
+  /** When a device took this call, for the stale-in-flight sweep. */
+  handedAt?: number;
 }
 
 /** Every call ever seen this process lifetime, oldest first. */
@@ -282,6 +294,21 @@ app.get('/inbox', (req: Request, res: Response) => {
     if (agent) agent.lastSeen = Date.now();
   }
 
+  // Offer again anything a device took but never answered — it died holding
+  // the message. Only while the caller is still waiting; a call nobody is
+  // listening for is not worth redelivering.
+  const now = Date.now();
+  for (const call of calls) {
+    if (
+      call.status === 'in-flight' &&
+      waiters.has(call.id) &&
+      now - (call.handedAt ?? now) > REQUEUE_AFTER_MS
+    ) {
+      call.status = 'queued';
+      log('CALL REQUEUED', 'device went away holding it; offering again', call.id);
+    }
+  }
+
   const next = calls.find(
     (c) => c.status === 'queued' && (!agentId || c.to === agentId),
   );
@@ -290,6 +317,7 @@ app.get('/inbox', (req: Request, res: Response) => {
     return;
   }
   next.status = 'in-flight';
+  next.handedAt = Date.now();
   log('HANDED TO DEVICE', `lane ${next.to}: "${preview(next.message)}"`, next.id);
   res.json({ id: next.id, message: next.message, from: next.from });
 });
