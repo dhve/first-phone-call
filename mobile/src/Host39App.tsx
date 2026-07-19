@@ -5,13 +5,14 @@ import { hostingService } from './hosting/hostingService';
 import { useHostingStatus } from './hosting/useHosting';
 import { CardEditorScreen } from './screens/CardEditorScreen';
 import { HostingScreen } from './screens/HostingScreen';
+import { NandaScreen } from './screens/NandaScreen';
 import { SignInScreen } from './screens/SignInScreen';
 import { colors, ui } from './screens/ui';
 
 export function Host39App() {
   const status = useHostingStatus();
   const [ready, setReady] = useState(false);
-  const [screen, setScreen] = useState<'hosting' | 'card'>('hosting');
+  const [screen, setScreen] = useState<'hosting' | 'card' | 'nanda'>('hosting');
 
   useEffect(() => {
     hostingService.init().finally(() => setReady(true));
@@ -37,5 +38,11 @@ export function Host39App() {
     return <CardEditorScreen onBack={() => setScreen('hosting')} />;
   }
 
-  return <HostingScreen onEditCard={() => setScreen('card')} />;
+  if (screen === 'nanda') {
+    return <NandaScreen onBack={() => setScreen('hosting')} />;
+  }
+
+  return (
+    <HostingScreen onEditCard={() => setScreen('card')} onNanda={() => setScreen('nanda')} />
+  );
 }

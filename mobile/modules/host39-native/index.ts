@@ -72,9 +72,25 @@ export interface Host39NativeModule {
   /** Streaming SHA-256 of a file; accepts a path or file:// URI, returns hex. */
   sha256File(path: string): Promise<string>;
   deviceHealth(): Promise<DeviceHealthSnapshot>;
-  /** Start (or restart) the relay foreground service with a WS URL + token. */
-  startRelayService(url: string, token: string): Promise<void>;
+  /**
+   * Start (or restart) the relay foreground service. Besides the WS URL and
+   * single-use token, the service persists the Host39 API base URL, device
+   * id, and JWT (EncryptedSharedPreferences) so it can mint fresh relay
+   * tokens itself after a process death or reboot, before JS is running.
+   */
+  startRelayService(
+    url: string,
+    token: string,
+    apiBaseUrl: string,
+    deviceId: string,
+    jwt: string,
+  ): Promise<void>;
   stopRelayService(): Promise<void>;
+  /**
+   * Refresh the JWT the service holds for native token minting. Call after
+   * every (re-)authentication; clears the service's auth-failed latch.
+   */
+  updateHostJwt(jwt: string): Promise<void>;
   /** Answer an onRelayTokenRequest with a freshly minted single-use token. */
   provideRelayToken(token: string): Promise<void>;
   /** Send an envelope (JSON string) to the relay. False if not connected. */

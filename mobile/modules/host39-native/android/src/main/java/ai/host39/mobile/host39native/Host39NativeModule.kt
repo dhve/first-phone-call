@@ -46,12 +46,20 @@ class Host39NativeModule : Module() {
       DeviceHealthReader.read(context)
     }
 
-    AsyncFunction("startRelayService") { url: String, token: String ->
-      RelayForegroundService.start(context, url, token)
+    AsyncFunction("startRelayService") {
+      url: String, token: String, apiBaseUrl: String, deviceId: String, jwt: String ->
+      RelayForegroundService.start(context, url, token, apiBaseUrl, deviceId, jwt)
     }
 
     AsyncFunction("stopRelayService") { ->
       RelayForegroundService.stop(context)
+    }
+
+    AsyncFunction("updateHostJwt") { jwt: String ->
+      // Persist even when the service is not running so a later boot restart
+      // mints with current credentials; a live service also retries with it.
+      RelayPrefs.get(context).edit().putString(RelayPrefs.KEY_JWT, jwt).apply()
+      RelayBridge.service?.onJwtUpdated(jwt)
     }
 
     AsyncFunction("provideRelayToken") { token: String ->

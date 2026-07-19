@@ -11,10 +11,21 @@ import { Directory, File, Paths } from 'expo-file-system';
 
 export interface Settings {
   serverBaseUrl?: string;
+  /**
+   * Base URL other agents reach the server on (signed-card url, registry_url).
+   * Defaults to serverBaseUrl; production deployments can differ.
+   */
+  publicBaseUrl?: string;
   email?: string;
+  /** Account display name (from the Host39 profile), used for NANDA publisher. */
+  displayName?: string;
   deviceId?: string;
   activeCardSlug?: string;
   hostingEnabled?: boolean;
+  /** NANDA index server base URL override (default in config.NANDA). */
+  nandaApiUrl?: string;
+  /** org_id of the NANDA registration for the active card, once created. */
+  nandaOrgId?: string;
 }
 
 export interface CardSkill {

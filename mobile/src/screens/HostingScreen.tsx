@@ -14,7 +14,13 @@ import { hostingService, type HostStatus } from '../hosting/hostingService';
 import { useHostingStatus } from '../hosting/useHosting';
 import { colors, ui } from './ui';
 
-export function HostingScreen({ onEditCard }: { onEditCard: () => void }) {
+export function HostingScreen({
+  onEditCard,
+  onNanda,
+}: {
+  onEditCard: () => void;
+  onNanda: () => void;
+}) {
   const status = useHostingStatus();
   const [actionError, setActionError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
@@ -203,7 +209,13 @@ export function HostingScreen({ onEditCard }: { onEditCard: () => void }) {
             }
           />
           {status.relay.error && <Text style={ui.errorText}>{status.relay.error}</Text>}
-          <StatusRow label="NANDA verification" value="Not verified (coming soon)" tone="muted" />
+          <StatusRow
+            label="NANDA registration"
+            value={nandaLabel(status)}
+            tone={nandaTone(status)}
+            action={{ label: 'Manage', onPress: onNanda }}
+          />
+          {status.nanda.error && <Text style={ui.errorText}>{status.nanda.error}</Text>}
           <StatusRow
             label="Public resolution"
             value={resolutionLabel(status)}
@@ -332,5 +344,26 @@ function resolutionLabel(status: HostStatus): string {
     case 'checking': return 'Checking';
     case 'resolved': return 'Resolves publicly';
     case 'not-resolved': return 'Not resolving';
+  }
+}
+
+function nandaLabel(status: HostStatus): string {
+  switch (status.nanda.state) {
+    case 'not-registered': return 'Not registered';
+    case 'signed-in': return 'Signed in, not registered';
+    case 'registering': return 'Registering';
+    case 'pending': return 'Pending email verification';
+    case 'active': return `Active (${status.nanda.orgId})`;
+    case 'error': return 'Error';
+  }
+}
+
+function nandaTone(status: HostStatus): Tone {
+  switch (status.nanda.state) {
+    case 'active': return 'ok';
+    case 'error': return 'err';
+    case 'registering':
+    case 'pending': return 'warn';
+    default: return 'muted';
   }
 }

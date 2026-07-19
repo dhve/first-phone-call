@@ -1,15 +1,11 @@
 import { Agent, LlamaEngine, ToolRegistry } from 'react-native-device-agent';
-import {
-  AGENT,
-  MIN_BATTERY_PERCENT,
-  MODEL,
-  agentUrn,
-  buildSystemPrompt,
-} from '../config';
+import { AGENT, MIN_BATTERY_PERCENT, MODEL, buildSystemPrompt } from '../config';
 import { createHostTools } from '../agent/tools';
 import {
   checkPublicResolution,
   createServerCard,
+  getBaseUrl,
+  getPublicBaseUrl,
   listServerCards,
   login,
   me,
@@ -19,6 +15,14 @@ import {
   registerDevice,
   updateServerCard,
 } from '../api/client';
+import {
+  createNandaOrg,
+  getNandaIndexRecord,
+  nandaLogin,
+  nandaRegisterAccount,
+} from '../api/nanda';
+import { buildNandaOrgPayload } from '../nanda/registration';
+import { buildSignableCard } from './signableCard';
 import { downloadModel, isModelDownloaded, modelFile, verifyModel } from '../modelManager';
 import {
   Host39Native,
@@ -46,7 +50,13 @@ import {
   type AuditEntry,
   type LocalCard,
 } from '../storage/appStorage';
-import { clearHost39Jwt, getHost39Jwt, setHost39Jwt } from '../storage/secureStore';
+import {
+  clearHost39Jwt,
+  getHost39Jwt,
+  getNandaJwt,
+  setHost39Jwt,
+  setNandaJwt,
+} from '../storage/secureStore';
 import { canonicalize } from '../util/canonicalize';
 import { base64ToBase64Url, utf8ToBase64 } from '../util/base64';
 import { Mutex } from '../util/mutex';
@@ -63,6 +73,13 @@ export type ModelState =
 export type PublicationState = 'not-published' | 'publishing' | 'published' | 'error';
 export type ResolutionState = 'unknown' | 'checking' | 'resolved' | 'not-resolved';
 export type RelayUiState = NativeRelayState | 'error';
+export type NandaState =
+  | 'not-registered'
+  | 'signed-in'
+  | 'registering'
+  | 'pending'
+  | 'active'
+  | 'error';
 
 export interface HostStatus {
   auth: { signedIn: boolean; email?: string };
@@ -71,8 +88,8 @@ export interface HostStatus {
   device: { registered: boolean; deviceId?: string; error?: string };
   publication: { state: PublicationState; version?: string; error?: string };
   relay: { state: RelayUiState; error?: string };
-  /** Placeholder until NANDA verification lands. */
-  nanda: { state: 'not-verified' };
+  /** NANDA index registration for the active card. */
+  nanda: { state: NandaState; orgId?: string; error?: string };
   resolution: { state: ResolutionState };
   hostingEnabled: boolean;
   busy: boolean;
@@ -93,7 +110,7 @@ class HostingService {
     device: { registered: false },
     publication: { state: 'not-published' },
     relay: { state: 'stopped' },
-    nanda: { state: 'not-verified' },
+    nanda: { state: 'not-registered' },
     resolution: { state: 'unknown' },
     hostingEnabled: false,
     busy: false,
@@ -106,6 +123,7 @@ class HostingService {
   /** Serializes inference: exactly one in-flight completion. */
   private mutex = new Mutex();
   private initialized = false;
+  private nandaPollTimer: ReturnType<typeof setInterval> | null = null;
 
   // Store plumbing (useSyncExternalStore-compatible).
 
@@ -142,6 +160,7 @@ class HostingService {
 
     const settings = loadSettings();
     const token = await getHost39Jwt().catch(() => null);
+    const nandaToken = await getNandaJwt().catch(() => null);
     const card = getCard(settings.activeCardSlug);
 
     this.update({
@@ -155,8 +174,14 @@ class HostingService {
         : { saved: false },
       device: { registered: !!settings.deviceId, deviceId: settings.deviceId },
       relay: { state: native?.getRelayState() ?? 'stopped' },
+      nanda: settings.nandaOrgId
+        ? { state: 'pending', orgId: settings.nandaOrgId }
+        : { state: nandaToken ? 'signed-in' : 'not-registered' },
       audit: loadAudit(),
     });
+
+    // Pick up status transitions (pending -> active) from a previous session.
+    if (settings.nandaOrgId) void this.refreshNandaStatus();
 
     // If the foreground service outlived the JS runtime (STICKY restart),
     // reflect that hosting is on and rebuild the engine it needs.
@@ -168,21 +193,43 @@ class HostingService {
 
   // Auth
 
-  async signIn(email: string, password: string, serverBaseUrl: string): Promise<void> {
-    saveSettings({ serverBaseUrl: serverBaseUrl.trim().replace(/\/+$/, '') });
+  async signIn(
+    email: string,
+    password: string,
+    serverBaseUrl: string,
+    publicBaseUrl?: string,
+  ): Promise<void> {
+    this.saveServerUrls(serverBaseUrl, publicBaseUrl);
     const { token } = await login(email.trim(), password);
-    await setHost39Jwt(token);
-    const profile = await me();
-    saveSettings({ email: profile.email });
-    this.update({ auth: { signedIn: true, email: profile.email } });
+    await this.onAuthenticated(token);
   }
 
-  async signUp(email: string, password: string, serverBaseUrl: string): Promise<void> {
-    saveSettings({ serverBaseUrl: serverBaseUrl.trim().replace(/\/+$/, '') });
+  async signUp(
+    email: string,
+    password: string,
+    serverBaseUrl: string,
+    publicBaseUrl?: string,
+  ): Promise<void> {
+    this.saveServerUrls(serverBaseUrl, publicBaseUrl);
     const { token } = await registerAccount(email.trim(), password);
+    await this.onAuthenticated(token);
+  }
+
+  private saveServerUrls(serverBaseUrl: string, publicBaseUrl?: string): void {
+    const cleanPublic = publicBaseUrl?.trim().replace(/\/+$/, '');
+    saveSettings({
+      serverBaseUrl: serverBaseUrl.trim().replace(/\/+$/, ''),
+      publicBaseUrl: cleanPublic || undefined,
+    });
+  }
+
+  private async onAuthenticated(token: string): Promise<void> {
     await setHost39Jwt(token);
+    // Keep the foreground service's persisted JWT fresh so it can mint relay
+    // tokens on its own after a process death or reboot.
+    await Host39Native?.updateHostJwt(token).catch(() => undefined);
     const profile = await me();
-    saveSettings({ email: profile.email });
+    saveSettings({ email: profile.email, displayName: profile.display_name ?? undefined });
     this.update({ auth: { signedIn: true, email: profile.email } });
   }
 
@@ -214,6 +261,19 @@ class HostingService {
   private async ensureEngineLoaded(): Promise<LlamaEngine> {
     if (this.engine?.isLoaded) return this.engine;
     if (!isModelDownloaded()) throw new Error('Model is not downloaded');
+
+    // Integrity gate: re-verify the on-disk file's SHA-256 before every load.
+    // verifyModel deletes the file on mismatch, so a corrupt or tampered
+    // model is never handed to the engine.
+    this.update({ model: { state: 'verifying', progress: 1 } });
+    try {
+      await verifyModel();
+    } catch (e) {
+      this.update({
+        model: { state: 'not-downloaded', progress: 0, error: (e as Error).message },
+      });
+      throw e;
+    }
 
     this.update({ model: { state: 'loading', progress: 1 } });
     try {
@@ -301,7 +361,7 @@ class HostingService {
 
       // 2. Sign the canonicalized card JSON with the Keystore key and push
       //    the cache the server serves while the phone is offline.
-      const signable = this.buildSignableCard(card, email, nextVersion);
+      const signable = buildSignableCard(card, email, nextVersion, getPublicBaseUrl());
       const canonical = canonicalize(signable);
       const signature = base64ToBase64Url(
         await requireHost39Native().sign(utf8ToBase64(canonical)),
@@ -328,25 +388,6 @@ class HostingService {
     }
   }
 
-  private buildSignableCard(
-    card: LocalCard,
-    email: string,
-    version: number,
-  ): Record<string, unknown> {
-    return {
-      name: card.name,
-      description: card.description || null,
-      version,
-      capabilities: { streaming: false, pushNotifications: false },
-      authentication: { schemes: ['none'] },
-      skills: card.skills,
-      _meta: {
-        identifier: agentUrn(email, card.slug),
-        hostedBy: 'host39.org',
-      },
-    };
-  }
-
   // Public resolution
 
   async checkResolution(): Promise<void> {
@@ -361,19 +402,121 @@ class HostingService {
     this.update({ resolution: { state: ok ? 'resolved' : 'not-resolved' } });
   }
 
+  // NANDA index registration
+
+  async nandaAuthenticate(
+    mode: 'signin' | 'signup',
+    email: string,
+    password: string,
+    apiUrl: string,
+  ): Promise<void> {
+    saveSettings({ nandaApiUrl: apiUrl.trim().replace(/\/+$/, '') || undefined });
+    const cleanEmail = email.trim();
+    const { token } =
+      mode === 'signin'
+        ? await nandaLogin(cleanEmail, password)
+        : await nandaRegisterAccount(cleanEmail, password, loadSettings().displayName);
+    await setNandaJwt(token);
+    if (!this.status.nanda.orgId) {
+      this.update({ nanda: { state: 'signed-in' } });
+    }
+  }
+
+  /**
+   * Register the active card with the NANDA index (POST /api/v1/orgs,
+   * hosting_path "personal"). The index emails a verification link to the
+   * account email; the registration turns active once it is clicked, which
+   * the status poll picks up.
+   */
+  async registerWithNanda(orgId: string): Promise<void> {
+    const card = this.getActiveCard();
+    const { email, displayName } = loadSettings();
+    if (!card) throw new Error('Create a card first');
+    if (!email) throw new Error('Not signed in');
+    if (!(await getNandaJwt())) throw new Error('Sign in to NANDA first');
+
+    this.update({ nanda: { state: 'registering', orgId } });
+    try {
+      const record = await createNandaOrg(
+        buildNandaOrgPayload({
+          orgId,
+          email,
+          displayName,
+          card,
+          publicBaseUrl: getPublicBaseUrl(),
+        }),
+      );
+      saveSettings({ nandaOrgId: record.org_id });
+      if (record.status === 'active') {
+        this.update({ nanda: { state: 'active', orgId: record.org_id } });
+        void this.checkResolution();
+      } else {
+        this.update({ nanda: { state: 'pending', orgId: record.org_id } });
+        this.startNandaPolling();
+      }
+    } catch (e) {
+      this.update({ nanda: { state: 'error', orgId, error: (e as Error).message } });
+      throw e;
+    }
+  }
+
+  /** Poll GET /api/v1/index/:org_id and reflect pending -> active. */
+  async refreshNandaStatus(): Promise<void> {
+    const orgId = this.status.nanda.orgId ?? loadSettings().nandaOrgId;
+    if (!orgId) return;
+    try {
+      const record = await getNandaIndexRecord(orgId);
+      if (record?.status === 'active') {
+        this.stopNandaPolling();
+        this.update({ nanda: { state: 'active', orgId } });
+        // The registration resolves publicly now; verify the card URL too.
+        void this.checkResolution();
+      } else {
+        this.update({ nanda: { state: 'pending', orgId } });
+      }
+    } catch (e) {
+      this.stopNandaPolling();
+      this.update({ nanda: { state: 'error', orgId, error: (e as Error).message } });
+    }
+  }
+
+  private startNandaPolling(): void {
+    if (this.nandaPollTimer) return;
+    this.nandaPollTimer = setInterval(() => {
+      void this.refreshNandaStatus();
+    }, 15_000);
+  }
+
+  private stopNandaPolling(): void {
+    if (this.nandaPollTimer) {
+      clearInterval(this.nandaPollTimer);
+      this.nandaPollTimer = null;
+    }
+  }
+
   // Hosting toggle
 
   async startHosting(): Promise<void> {
     if (!this.getActiveCard()) throw new Error('Create a card before hosting');
     const deviceId = loadSettings().deviceId;
     if (!deviceId) throw new Error('Register the device key first');
+    const jwt = await getHost39Jwt();
+    if (!jwt) throw new Error('Not signed in');
     await this.ensureEngineLoaded();
 
     const session = await mintRelaySession(deviceId);
     // ws_url embeds the single-use token; hand the service the bare URL plus
-    // the token so it can append fresh tokens on reconnect.
+    // the token so it can append fresh tokens on reconnect. The API base URL,
+    // device id, and JWT let the service mint tokens itself after a process
+    // death or reboot, before the JS runtime is back.
     const baseUrl = session.ws_url.split('?')[0];
-    await requireHost39Native().startRelayService(baseUrl, session.token);
+    await requireHost39Native().startRelayService(
+      baseUrl,
+      session.token,
+      getBaseUrl(),
+      deviceId,
+      jwt,
+    );
     saveSettings({ hostingEnabled: true });
     this.update({ hostingEnabled: true });
   }
@@ -445,13 +588,32 @@ class HostingService {
 
   /** Gate, run, and answer one relay request. */
   private async handleRequest(env: RequestEnvelope): Promise<void> {
-    const card = this.getActiveCard();
-    const slug = card?.slug ?? 'unknown';
+    const requestedSlug = typeof env.slug === 'string' ? env.slug : 'unknown';
 
     if (env.method !== 'message/send') {
-      await this.rejectRequest(env, 'METHOD_NOT_FOUND', `Unsupported method: ${env.method}`, slug);
+      await this.rejectRequest(
+        env,
+        'METHOD_NOT_FOUND',
+        `Unsupported method: ${env.method}`,
+        requestedSlug,
+      );
       return;
     }
+
+    // Card-slug binding: the envelope names the card it is addressed to.
+    // Only a locally published card with that exact slug may answer; anything
+    // else is a structured rejection, never another card's context.
+    const card = typeof env.slug === 'string' ? getCard(env.slug) : undefined;
+    if (!card || card.version < 1) {
+      await this.rejectRequest(
+        env,
+        'UNKNOWN_CARD',
+        `No published card with slug "${requestedSlug}" on this device`,
+        requestedSlug,
+      );
+      return;
+    }
+    const slug = card.slug;
 
     // Request gating: structured rejections, checked before any inference.
     let health;
@@ -484,10 +646,6 @@ class HostingService {
     }
     if (!this.engine?.isLoaded) {
       await this.rejectRequest(env, 'MODEL_NOT_LOADED', 'Model is not loaded', slug);
-      return;
-    }
-    if (!card) {
-      await this.rejectRequest(env, 'BAD_REQUEST', 'No card is configured on this device', slug);
       return;
     }
 

@@ -44,10 +44,18 @@ Then build & launch on Android (regenerates native dirs on first run):
 npm run android
 ```
 
-Sign in against a running Host39 server (default `http://10.0.2.2:3000`
+Sign in against a running Host39 server (default `http://10.0.2.2:3010`
 reaches your machine from the emulator; override on the sign-in screen),
 create a card, download the model, register the device key, then flip the
-hosting toggle.
+hosting toggle. The NANDA row on the status panel opens the registration
+flow against a NANDA index server (default `https://api.nandaindex.org`,
+overridable).
+
+Run the unit tests (pure logic with mocked Expo/native modules):
+
+```sh
+npm test -w mobile
+```
 
 ## Notes
 

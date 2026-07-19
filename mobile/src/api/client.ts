@@ -1,4 +1,4 @@
-import { API_PATHS, SERVER } from '../config';
+import { API_PATHS, SERVER, emailHandle } from '../config';
 import { loadSettings } from '../storage/appStorage';
 import { getHost39Jwt } from '../storage/secureStore';
 import type { DevicePublicKeyJwk } from '../../modules/host39-native';
@@ -42,6 +42,14 @@ export interface UserProfile {
 
 export function getBaseUrl(): string {
   return (loadSettings().serverBaseUrl || SERVER.defaultBaseUrl).replace(/\/+$/, '');
+}
+
+/**
+ * Base URL other agents reach the server on (used in the signed card's url
+ * and NANDA registry_url). Defaults to the configured server base URL.
+ */
+export function getPublicBaseUrl(): string {
+  return (loadSettings().publicBaseUrl || '').replace(/\/+$/, '') || getBaseUrl();
 }
 
 /** WS URL for the relay, derived from the HTTP base URL. */
@@ -161,11 +169,18 @@ export function putCardCache(
   return request(API_PATHS.cardCache(slug), { method: 'PUT', body });
 }
 
-/** True when the public card URL resolves (served by the server). */
+/**
+ * True when the public card URL resolves to the signed card. Uses the public
+ * base URL and the account handle, matching the URL NANDA registrations
+ * advertise as registry_url.
+ */
 export async function checkPublicResolution(email: string, slug: string): Promise<boolean> {
   try {
-    const response = await fetch(`${getBaseUrl()}${API_PATHS.publicCard(email, slug)}`);
-    return response.ok;
+    const url = `${getPublicBaseUrl()}${API_PATHS.publicCard(emailHandle(email), slug)}`;
+    const response = await fetch(url);
+    if (!response.ok) return false;
+    const card = (await response.json()) as { name?: unknown } | null;
+    return !!card && typeof card.name === 'string';
   } catch {
     return false;
   }

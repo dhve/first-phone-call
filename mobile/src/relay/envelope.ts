@@ -15,7 +15,7 @@ export const RELAY_PROTOCOL_VERSION = 1;
 /**
  * Numeric JSON-RPC-style error codes the phone returns in error envelopes.
  * Standard codes where they apply; gating conditions use the device range
- * -32020..-32025. The server surfaces them via A2A "Agent error" details.
+ * -32020..-32026. The server surfaces them via A2A "Agent error" details.
  */
 export const RELAY_AGENT_ERRORS = {
   OFFLINE: -32020,
@@ -24,6 +24,8 @@ export const RELAY_AGENT_ERRORS = {
   LOW_BATTERY: -32023,
   MODEL_NOT_LOADED: -32024,
   DEADLINE_EXCEEDED: -32025,
+  /** The envelope's slug does not match any locally published card. */
+  UNKNOWN_CARD: -32026,
   METHOD_NOT_FOUND: -32601,
   BAD_REQUEST: -32602,
   INTERNAL: -32603,
@@ -90,6 +92,11 @@ export interface RequestEnvelope {
   type: 'request';
   id: string;
   method: 'message/send';
+  /**
+   * Slug of the card this request is addressed to. The phone must answer
+   * with that card's context only (or reject with UNKNOWN_CARD).
+   */
+  slug: string;
   params: MessageSendParams;
   /** Unix epoch ms after which the server no longer accepts a response. */
   deadline: number;

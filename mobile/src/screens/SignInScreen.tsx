@@ -22,6 +22,7 @@ export function SignInScreen() {
   const [serverUrl, setServerUrl] = useState(
     loadSettings().serverBaseUrl ?? SERVER.defaultBaseUrl,
   );
+  const [publicUrl, setPublicUrl] = useState(loadSettings().publicBaseUrl ?? '');
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +32,8 @@ export function SignInScreen() {
     setPending(true);
     setError(null);
     try {
-      if (mode === 'signin') await hostingService.signIn(email, password, serverUrl);
-      else await hostingService.signUp(email, password, serverUrl);
+      if (mode === 'signin') await hostingService.signIn(email, password, serverUrl, publicUrl);
+      else await hostingService.signUp(email, password, serverUrl, publicUrl);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -81,6 +82,15 @@ export function SignInScreen() {
               onChangeText={setServerUrl}
               autoCapitalize="none"
               placeholder={SERVER.defaultBaseUrl}
+              placeholderTextColor={colors.faint}
+            />
+            <Text style={ui.label}>Public base URL (optional)</Text>
+            <TextInput
+              style={ui.input}
+              value={publicUrl}
+              onChangeText={setPublicUrl}
+              autoCapitalize="none"
+              placeholder="Defaults to the server URL"
               placeholderTextColor={colors.faint}
             />
             {error && <Text style={ui.errorText}>{error}</Text>}
