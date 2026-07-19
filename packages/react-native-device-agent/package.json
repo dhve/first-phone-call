@@ -1,0 +1,62 @@
+{
+  "name": "react-native-device-agent",
+  "version": "0.0.1",
+  "description": "On-device LLM agent harness for React Native. Register JS functions as tools and let a local llama.rn model call them.",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "react-native": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "echo 'TODO: react-native-builder-bob before publish' && tsc --noEmit"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "llm",
+    "agent",
+    "on-device",
+    "llama.cpp",
+    "llama.rn",
+    "tool-calling",
+    "function-calling"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "llama.rn": "*",
+    "react": "*",
+    "react-native": "*"
+  },
+  "peerDependenciesMeta": {
+    "expo-calendar": {
+      "optional": true
+    },
+    "expo-contacts": {
+      "optional": true
+    },
+    "expo-notifications": {
+      "optional": true
+    },
+    "expo-location": {
+      "optional": true
+    },
+    "expo-clipboard": {
+      "optional": true
+    },
+    "expo-file-system": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "llama.rn": "^0.12.6",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "ajv": "^6.15.0"
+  }
+}
