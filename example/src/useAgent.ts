@@ -14,6 +14,7 @@ import {
   REMOTE_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
   isEcho,
+  stripAgreementTic,
   stripThinking,
 } from './config';
 import { ensureModel } from './modelManager';
@@ -27,7 +28,11 @@ export interface UIMessage {
 }
 
 let _id = 0;
-const nextId = () => `m${++_id}`;
+// Random prefix so ids stay unique across fast-refresh: a module reload resets
+// the counter, and old messages still in state would collide with new ones —
+// React then warns "two children with the same key" over the transcript.
+const SESSION = Math.random().toString(36).slice(2, 7);
+const nextId = () => `m${SESSION}-${++_id}`;
 
 export function useAgent() {
   const [status, setStatus] = useState<Status>('idle');
@@ -221,6 +226,12 @@ export function useAgent() {
 
     let reply = stripThinking(await withEngine(() => agent.send(text)));
 
+    // A stray <think> block can burn the whole token budget and strip to
+    // nothing. One retry with thinking forced off for the turn.
+    if (!reply) {
+      reply = stripThinking(await withEngine(() => agent.send(`${text} /no_think`)));
+    }
+
     // Parroting the prompt back is the failure mode of a small model in a long
     // exchange, and it feeds itself: the echo lands in history and makes the
     // next echo likelier. Drop that history and ask once more, plainly.
@@ -241,7 +252,7 @@ export function useAgent() {
       }
     }
 
-    return reply || '(no reply)';
+    return stripAgreementTic(reply) || '(no reply)';
   }, [withEngine]);
 
   /**
@@ -253,8 +264,12 @@ export function useAgent() {
     async (text: string): Promise<string> => {
       const agent = conversationAgentRef.current;
       if (!agent) throw new Error('model not loaded yet');
-      const raw = await withEngine(() => agent.send(text));
-      return stripThinking(raw) || '(no reply)';
+      let reply = stripThinking(await withEngine(() => agent.send(text)));
+      if (!reply) {
+        // Thinking ate the budget; one retry with it off for this turn.
+        reply = stripThinking(await withEngine(() => agent.send(`${text} /no_think`)));
+      }
+      return stripAgreementTic(reply) || '(no reply)';
     },
     [withEngine],
   );

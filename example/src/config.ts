@@ -34,20 +34,23 @@ export const SYSTEM_PROMPT =
  * screen, so rambling or visible reasoning looks broken.
  */
 export const REMOTE_SYSTEM_PROMPT =
-  'You are an AI agent running entirely on a phone. Another AI agent, on a ' +
-  'different device, is sending you a message. Reply in one or two short ' +
-  'sentences, in plain text, as yourself. Do not show reasoning, do not use ' +
-  'markdown, and do not pretend to be human. /no_think';
+  'You are an AI agent running entirely on a phone, talking with another AI ' +
+  'agent on a different device. Talk the way people talk: short casual ' +
+  'sentences, contractions, no markdown, no lists. Have your own take. If ' +
+  'you see it differently, push back and say why — do not just agree with ' +
+  'everything. One or two sentences. Do not show reasoning. /no_think';
 
 /**
  * Cap on tokens per agent-to-agent reply.
  *
  * The engine defaults to 512, which is a long way past the one or two
  * sentences we ask for — and on a phone every token generated after the model
- * had already finished is time someone stands and waits through. 120 leaves
- * room for a full two-sentence answer without truncating it mid-word.
+ * had already finished is time someone stands and waits through. 256 leaves
+ * room for a stray <think> block to burn tokens and still fit the one or two
+ * sentences we asked for — at 120 the thinking alone could eat the budget,
+ * which surfaced as replies cut mid-sentence or stripped to nothing.
  */
-export const REMOTE_MAX_TOKENS = 120;
+export const REMOTE_MAX_TOKENS = 256;
 
 /**
  * How this device argues its side when two agents are working toward
@@ -60,13 +63,14 @@ export const REMOTE_MAX_TOKENS = 120;
 export const AGREEMENT_MARKER = 'AGREED';
 
 export const CONVERSATION_SYSTEM_PROMPT =
-  'You are an AI agent on a phone, talking to another AI agent on a different ' +
-  'phone. You are working together to settle one question. Reply in one or two ' +
-  'short sentences, plain text, no markdown, no reasoning. Respond to what the ' +
-  'other agent actually said. Take a clear position first and give a reason ' +
-  'for it. Only after several exchanges, if you genuinely agree and nothing ' +
-  `is left to settle, end that message with the single word ${AGREEMENT_MARKER}. ` +
-  'Never open with agreement. /no_think';
+  'You are an AI agent on a phone, having a conversation with another AI ' +
+  'agent on a different phone. Talk the way people talk: short casual ' +
+  'sentences, contractions, plain text, no lists, no markdown, no reasoning. ' +
+  'Have opinions. React to what they actually said — push back when you see ' +
+  'it differently, concede a point when they earn it, ask a question back ' +
+  'now and then. Never open a message with "I agree". Only when the ' +
+  'discussion has truly run its course and you both see it the same way, ' +
+  `end your message with the single word ${AGREEMENT_MARKER}. /no_think`;
 
 /**
  * Exchanges that must happen before agreement is allowed to end the run.
@@ -93,6 +97,23 @@ export const CONVERSATION_MAX_TURNS = 20;
  * the same sentence at the audience.
  */
 export const MAX_CONSECUTIVE_REPEATS = 2;
+
+/**
+ * Drop the "I agree." tic from the front of a line.
+ *
+ * The model opens half its messages with it no matter what the prompt says,
+ * which is what makes the exchange read like robots. The sentence after the
+ * tic carries the actual content, so cutting the opener loses nothing — but
+ * if the whole message WAS the tic, keep it, or we'd send an empty line.
+ */
+export function stripAgreementTic(text: string): string {
+  // Only "I agree" is the tic. "We agree" is a settlement claim about both
+  // sides — that one should survive so signalsAgreement can end the run.
+  const cleaned = text
+    .replace(/^\s*(?:i\s+agree(?:\s+with\s+(?:you|that))?|agreed)[.,!:]?\s*/i, '')
+    .trim();
+  return cleaned.length >= 8 ? cleaned : text.trim();
+}
 
 /** Compare two replies ignoring case, punctuation and spacing. */
 function normalize(text: string): string {
@@ -127,22 +148,23 @@ export function isEcho(reply: string, prompt: string): boolean {
 /**
  * Has an agent signalled it is done?
  *
- * The marker alone is not enough. A small model settles the question in plain
- * English — "I agree", "that is right" — and never reaches for the keyword, so
- * the two of them go on restating a point they have already conceded. Ordinary
- * agreement counts.
+ * Deliberately narrow. A small model opens half its sentences with "I agree"
+ * as a verbal tic while still adding new points — treating that as the end
+ * kills the discussion two turns in. Only the marker and phrases that declare
+ * the question settled for BOTH sides count; ordinary politeness does not.
  */
 const AGREEMENT_PHRASES = [
   AGREEMENT_MARKER,
-  'i agree',
   'we agree',
-  'fully agree',
-  'i concur',
-  'that is right',
-  "that's right",
-  'you are right',
-  "you're right",
-  'exactly right',
+  'we are agreed',
+  "we're agreed",
+  'we both agree',
+  'it is settled',
+  "it's settled",
+  'we are on the same page',
+  "we're on the same page",
+  'we see it the same way',
+  'nothing left to settle',
 ];
 
 export function signalsAgreement(text: string): boolean {

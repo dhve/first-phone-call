@@ -225,16 +225,16 @@ export function DeviceAgentApp() {
       // sentence tells it nothing about what to do with it, and a small model
       // answers that by repeating it.
       let line = await converseTurn(
-        `You are speaking with another AI agent about this question: "${topic}". ` +
-          `State your own position in one sentence and give one reason for it. ` +
-          `Do not repeat the question back.`,
+        `You're opening a chat with another AI agent about: "${topic}". ` +
+          `Say what you think and why, the way you'd say it to a colleague — ` +
+          `one or two short sentences. Don't repeat the question back.`,
       );
 
       // If it parroted the topic anyway, ask once more, more bluntly.
       if (isEcho(line, topic)) {
         line = await converseTurn(
-          `Do not repeat the question. Say what you personally think about ` +
-            `"${topic}", in one sentence, and why.`,
+          `Don't repeat the question. Just say what you personally think ` +
+            `about "${topic}", in one casual sentence, and why.`,
         );
       }
 
@@ -252,6 +252,18 @@ export function DeviceAgentApp() {
         }
         appendLine('assistant', `📞 ${peerName}: ${res.reply}`);
 
+        // An empty answer is a stall, not speech. Relaying "(no reply)" once
+        // had the two of them politely discussing the string "(no reply)".
+        if (!res.reply.trim() || res.reply.trim() === '(no reply)') {
+          appendLine('tool', '… other agent came up empty — asking again');
+          line = await converseTurn(
+            `They didn't really answer. Make your point about "${topic}" ` +
+              `again from a different angle, in one short sentence, and end ` +
+              `with a direct question to them.`,
+          );
+          continue;
+        }
+
         if (turn >= MIN_TURNS_BEFORE_AGREEMENT && signalsAgreement(res.reply)) {
           appendLine('tool', `🤝 agreed after ${turn} turn${turn === 1 ? '' : 's'}`);
           return;
@@ -267,8 +279,10 @@ export function DeviceAgentApp() {
 
         const previous = line;
         line = await converseTurn(
-          `The other agent replied: "${res.reply}". Respond to that point in ` +
-            `one or two sentences, in your own words. Do not repeat what they said.`,
+          `They said: "${res.reply}". Reply like a person in a conversation — ` +
+            `react to their point, push back or add something new, maybe ask ` +
+            `a question back. One or two short sentences, your own words. ` +
+            `Don't repeat them and don't open with "I agree".`,
         );
 
         // Repeating is worth one attempt to break out of, not an immediate
