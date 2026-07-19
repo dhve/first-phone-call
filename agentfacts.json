@@ -1,0 +1,125 @@
+{
+  "id": "react-native-device-agent",
+  "agent_name": "urn:agent:device-agent:react-native-device-agent",
+  "label": "Device Agent (on-device LLM harness demo)",
+  "description": "On-device LLM agent harness for React Native, built on llama.rn. This card describes the example demo app's configuration: Gemma 3 270M Instruct (Q8_0 GGUF) running fully offline after a one-time model download, with all 7 built-in tool groups enabled plus one custom tool. There is no network endpoint; this document is descriptive/discovery metadata only, not a live callable A2A agent.",
+  "version": "0.0.1",
+  "documentationUrl": "https://github.com/dhve/first-phone-call/blob/main/README.md",
+
+  "provider": {
+    "name": "first-phone-call (device-agent project)",
+    "url": "https://github.com/dhve/first-phone-call"
+  },
+
+  "endpoints": {
+    "static": [],
+    "note": "No live endpoints. This agent runs fully offline, on-device; there is no network invocation surface."
+  },
+
+  "capabilities": {
+    "modalities": ["text"],
+    "streaming": true,
+    "batch": false
+  },
+
+  "skills": [
+    {
+      "id": "network",
+      "description": "Make outbound HTTP requests (http_request) using the device's global fetch.",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "filesystem",
+      "description": "Read, write, and list files in app-sandboxed storage (read_file, write_file, list_files) via expo-file-system.",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "clipboard",
+      "description": "Read and write the system clipboard (get_clipboard, set_clipboard) via expo-clipboard.",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "notifications",
+      "description": "Schedule local device notifications (schedule_notification) via expo-notifications.",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "contacts",
+      "description": "Search the device's contacts (search_contacts) via expo-contacts.",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "calendar",
+      "description": "List and create calendar events (list_calendar_events, create_calendar_event) via expo-calendar.",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "location",
+      "description": "Read the device's current geographic location (get_current_location) via expo-location.",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    },
+    {
+      "id": "get_current_time",
+      "description": "Return the current device date/time (ISO 8601). A custom tool defined by the demo app, not part of the package's built-in tool catalog.",
+      "inputModes": ["text"],
+      "outputModes": ["text"]
+    }
+  ],
+
+  "x_device_agent": {
+    "on_device_execution": true,
+
+    "baseline_model": {
+      "name": "Gemma 3 270M Instruct",
+      "quantization": "Q8_0 GGUF",
+      "provider": "Google (base weights); ggml-org (GGUF quantization)",
+      "context_window": 4096,
+      "runtime": "llama.rn",
+      "download_size": "~292MB",
+      "license": "Gemma Terms of Use (restrictive, non-OSI-approved) — https://ai.google.dev/gemma/terms",
+      "harness_license": "MIT (the react-native-device-agent package itself)"
+    },
+
+    "device_permissions": {
+      "network": "none (uses global fetch)",
+      "filesystem": "none beyond app-sandboxed storage (expo-file-system)",
+      "clipboard": "none required by OS (expo-clipboard)",
+      "notifications": "POST_NOTIFICATIONS (Android 13+) / notification permission (iOS)",
+      "contacts": "READ_CONTACTS (Android) / NSContactsUsageDescription (iOS)",
+      "calendar": "READ_CALENDAR, WRITE_CALENDAR (Android) / NSCalendarsUsageDescription (iOS)",
+      "location": "ACCESS_FINE_LOCATION or ACCESS_COARSE_LOCATION (Android) / NSLocationWhenInUseUsageDescription (iOS)",
+      "get_current_time": "none (pure JS, no device API)"
+    },
+
+    "signature_status": "unsigned — this document is descriptive metadata only and carries no cryptographic signature.",
+
+    "facts_url": "https://raw.githubusercontent.com/dhve/first-phone-call/main/agentfacts.json",
+
+    "schema_deviations": [
+      "Does not include capabilities.authentication, which the underlying lean AgentFacts schema (agentfacts.org/schema/v1) technically requires. Omitted deliberately: OS-level runtime permissions (see device_permissions) don't fit an OAuth/API-key-shaped auth model, and bending requiredScopes to hold Android permission strings would mislead generic A2A/OASF tooling into thinking this exposes a real credentialed auth flow."
+    ],
+
+    "known_limitations": [
+      "No network invocation endpoint — this document is descriptive/discovery-only, not a live callable A2A agent. endpoints.static is intentionally empty.",
+      "Not registered with the live NANDA index (index.projectnanda.org) — resolvable only via this repo's facts_url, and only by someone who already has it.",
+      "No cryptographic signature — authenticity and integrity of this document cannot be verified; treat it as self-published metadata.",
+      "No DID or resolvable URN — 'id' is a plain string tied to the npm package name, not a decentralized identifier.",
+      "Deliberately omits capabilities.authentication (see schema_deviations above) in favor of the device_permissions block.",
+      "Model license (Gemma Terms of Use) is restrictive and non-OSI-approved; redistribution and use-case restrictions apply beyond what's summarized here — see the linked terms for the authoritative text.",
+      "No GGUF checksum or model-file integrity verification is declared.",
+      "No latency, throughput, or maxTokens figures are declared for any skill — none have been measured.",
+      "No performance, reputation, or certification data — no telemetry pipeline or third-party audit exists for this project.",
+      "Gemma 3 270M is a very small model; tool-call reliability is expected to be weaker than with larger instruction-tuned models. This has not been formally benchmarked.",
+      "No automated or manual end-to-end test evidence backs this card yet.",
+      "Describes the example demo app's configuration only (all 7 tool groups enabled); the underlying react-native-device-agent package lets any consuming app enable a different subset.",
+      "If/when a real backend (e.g. the Host39 plan in .vscode/host39_plan.txt) is built, this card's id, endpoints, and signature fields will need real replacement, not incremental filling-in."
+    ]
+  }
+}
