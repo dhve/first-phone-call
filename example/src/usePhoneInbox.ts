@@ -21,12 +21,30 @@ export interface InboxOptions {
   answer: (message: string, from: string) => Promise<string>;
   /** Surface activity in the UI. */
   onEvent?: (line: string) => void;
+  /**
+   * Handles a typed call item (ring, accept, spoken turn, hangup). The item
+   * is acked only after this resolves; a phone that dies mid-turn therefore
+   * leaves the item unacked and the relay offers it again.
+   */
+  onCallItem?: (item: CallInboxItem) => Promise<void>;
 }
 
 interface InboxItem {
   id: string;
   message: string;
   from: string;
+}
+
+/** A typed call-session item; legacy text items carry no `kind`. */
+export interface CallInboxItem {
+  id: string;
+  kind: 'offer' | 'accept' | 'turn' | 'hangup';
+  sessionId: string;
+  fromName?: string;
+  turnNo?: number;
+  audioId?: string | null;
+  debugText?: string;
+  reason?: string;
 }
 
 /**
@@ -38,7 +56,7 @@ interface InboxItem {
  * each message once, so a paused poller simply leaves work queued.
  */
 export function usePhoneInbox(options: InboxOptions) {
-  const { relayUrl, enabled, answer, onEvent } = options;
+  const { relayUrl, enabled, answer, onEvent, onCallItem } = options;
   const [status, setStatus] = useState<InboxStatus>('off');
   const [pairing, setPairing] = useState<Pairing | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -47,8 +65,10 @@ export function usePhoneInbox(options: InboxOptions) {
   // Refs so the loop isn't torn down and restarted on every render.
   const answerRef = useRef(answer);
   const onEventRef = useRef(onEvent);
+  const onCallItemRef = useRef(onCallItem);
   answerRef.current = answer;
   onEventRef.current = onEvent;
+  onCallItemRef.current = onCallItem;
 
   const emit = useCallback((line: string) => onEventRef.current?.(line), []);
 
@@ -132,8 +152,29 @@ export function usePhoneInbox(options: InboxOptions) {
           }
           if (!res.ok) throw new Error(`inbox returned ${res.status}`);
 
-          const item = (await res.json()) as InboxItem;
+          const raw = (await res.json()) as InboxItem | CallInboxItem;
           if (cancelled) return;
+
+          // Call-session items take a different path: they are processed by
+          // the call state machine and completed with /ack, not /outbox.
+          if ('kind' in raw) {
+            setStatus('answering');
+            await onCallItemRef.current?.(raw);
+            if (cancelled) return;
+            const ackRes = await fetch(`${base}/ack`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messageId: raw.id }),
+            });
+            if (!ackRes.ok && ackRes.status !== 404) {
+              throw new Error(`ack returned ${ackRes.status}`);
+            }
+            setLastError(null);
+            setStatus('listening');
+            continue;
+          }
+
+          const item = raw;
 
           setStatus('answering');
           // The suffix after '#' is a conversation id, plumbing rather than a

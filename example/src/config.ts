@@ -21,6 +21,57 @@ export const MODEL = {
   nCtx: 4096,
 };
 
+// ---------------------------------------------------------------------------
+// Audio phone call
+// ---------------------------------------------------------------------------
+
+/** Master switch for the call UI; the text conversation flow stays either way. */
+export const AUDIO_CALL_ENABLED = true;
+
+/**
+ * When true (the demo), each agent's LLM consumes what whisper HEARD, not
+ * what the peer sent. False is the emergency fallback: audio still plays,
+ * but the model reads the exact sent text, taking STT out of the loop.
+ */
+export const CONSUME_TRANSCRIPTION = true;
+
+/**
+ * Whisper model. base.en (q5_1, ~60 MB) over tiny.en: the transcription feeds
+ * a 270M LLM that derails on garbled input, so accuracy wins over 30 MB.
+ * SHA-256 values are the Hugging Face lfs.oid for each file at
+ * https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main
+ * (fetched 2026-07-19).
+ */
+const WHISPER_MODELS = {
+  'base.en': {
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin',
+    fileName: 'ggml-base.en-q5_1.bin',
+    sizeLabel: '~57 MB',
+    sha256: '4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f',
+  },
+  'tiny.en': {
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin',
+    fileName: 'ggml-tiny.en-q5_1.bin',
+    sizeLabel: '~31 MB',
+    sha256: 'c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b',
+  },
+} as const;
+
+export const WHISPER_MODEL: keyof typeof WHISPER_MODELS = 'base.en';
+export const WHISPER = WHISPER_MODELS[WHISPER_MODEL];
+
+/** How long the callee's ring UI waits before answering by itself. */
+export const AUTO_ANSWER_MS = 3_000;
+
+/** Give up dialing if the peer has not answered by then (relay enforces too). */
+export const RING_TIMEOUT_MS = 30_000;
+
+/**
+ * A turn that produced neither audio nor an inbox follow-up in this long
+ * means the call died somewhere; hang up instead of listening forever.
+ */
+export const TURN_TIMEOUT_MS = 120_000;
+
 export const SYSTEM_PROMPT =
   'You are a helpful assistant running entirely on the user\'s device. ' +
   'You can call tools to take real actions (clipboard, files, web requests, ' +

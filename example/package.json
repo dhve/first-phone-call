@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "buffer": "^6.0.3",
     "expo": "~56.0.11",
     "expo-audio": "~56.0.12",
     "expo-build-properties": "~56.0.18",
@@ -14,6 +15,7 @@
     "expo-location": "~56.0.17",
     "expo-notifications": "~56.0.17",
     "expo-status-bar": "~56.0.4",
+    "js-sha256": "^0.12.0",
     "llama.rn": "^0.12.4",
     "react": "19.2.3",
     "react-native": "0.85.3",
