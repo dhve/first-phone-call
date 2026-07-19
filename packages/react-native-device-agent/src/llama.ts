@@ -25,6 +25,12 @@ export interface ChatOptions {
   seed?: number;
   stop?: string[];
   /**
+   * Whether the chat template may open a reasoning (<think>) block. llama.rn
+   * defaults this to true; hybrid-reasoning models like Qwen3.5 then spend
+   * the whole n_predict budget thinking and never emit a visible answer.
+   */
+  enableThinking?: boolean;
+  /**
    * Abort signal for this completion. When it fires, the active llama.rn
    * completion is stopped and `chat()` rejects with an `AbortError`.
    */
@@ -106,8 +112,13 @@ export class LlamaEngine {
       const result: any = await this.ctx.completion(
         {
           messages,
+          // jinja unconditionally: enable_thinking is a jinja template kwarg,
+          // so on the legacy template path it is silently ignored — which
+          // left Qwen3.5 thinking through its whole token budget and
+          // returning empty answers on the no-tools path.
+          jinja: true,
           ...(hasTools
-            ? { tools: options.tools, tool_choice: options.toolChoice ?? 'auto', jinja: true }
+            ? { tools: options.tools, tool_choice: options.toolChoice ?? 'auto' }
             : {}),
           temperature: options.temperature ?? 0.7,
           n_predict: options.n_predict ?? 512,
@@ -118,6 +129,7 @@ export class LlamaEngine {
           // conversation into an echo chamber. Fresh entropy per completion
           // unless the caller pins one for reproducibility.
           seed: options.seed ?? Math.floor(Math.random() * 0x7fffffff),
+          enable_thinking: options.enableThinking ?? true,
         },
         (data: { token?: string }) => {
           if (options.onToken && typeof data?.token === 'string') options.onToken(data.token);

@@ -1,24 +1,35 @@
 /**
  * Demo configuration: which model to download and the agent's behavior.
  *
- * Gemma 3 270M (instruction-tuned, Q8_0) is tiny (~292 MB), loads in a couple
- * of seconds, and leaves plenty of RAM headroom next to whisper during audio
- * calls. Its chat template has no tool-calling support, so the local chat
- * tools degrade on this model; the phone-call flow never calls tools, which is
- * the trade this demo makes on purpose.
+ * Qwen3.5-0.8B (Q4_K_M, March 2026) succeeds the Qwen3-0.6B this demo started
+ * on. Gemma 3 270M was tried here first and is ~240 MB lighter — real headroom
+ * next to whisper during audio calls — but it could not hold up its half of an
+ * agent-to-agent conversation: asked which of two things it preferred, it
+ * answered about accessibility and performance. The text demo is the one on
+ * stage, so it gets the model that can actually answer.
  *
- * stripThinking is kept even though Gemma does not emit <think> blocks: it is
- * a no-op on clean output and a guard if the model is swapped again.
+ * If the audio call turns out to need that headroom back on a 4 GB device,
+ * this is the line to revert.
+ *
+ * nCtx is 2048, not 4096, on purpose. The KV cache scales with context and was
+ * costing more memory than the weights on the tablet that kept being
+ * OOM-killed; halving it buys back more than the heavier model costs. Turns
+ * are one or two sentences, and the engine trims oldest turns when a
+ * conversation outgrows the window.
+ *
+ * Qwen has hybrid reasoning and will emit <think> blocks unless told not to
+ * (see enableThinking where the agents are built); stripThinking is the guard
+ * for anything that slips through.
  */
 export const MODEL = {
-  /** Single-file GGUF download (llama.cpp org quant repo). */
-  url: 'https://huggingface.co/ggml-org/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-Q8_0.gguf',
+  /** Single-file GGUF download (unsloth mirror — ungated, no HF token needed). */
+  url: 'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf',
   /** Local filename to store it as. */
-  fileName: 'gemma-3-270m-it-Q8_0.gguf',
+  fileName: 'Qwen3.5-0.8B-Q4_K_M.gguf',
   /** Approx download size, for the UI. */
-  sizeLabel: '~292 MB',
+  sizeLabel: '~530 MB',
   /** Context window. */
-  nCtx: 4096,
+  nCtx: 2048,
 };
 
 // ---------------------------------------------------------------------------

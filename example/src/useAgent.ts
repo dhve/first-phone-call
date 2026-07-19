@@ -128,18 +128,24 @@ export function useAgent() {
       // carrot?" it answered about accessibility and performance, told
       // "First call on Internet" it tried to resolve a hostname. A
       // conversation partner just talks; only the local chat gets tools.
+      // enableThinking: false — Qwen3.5 thinks by default and spends the
+      // whole token budget inside <think>, which surfaced as every reply
+      // arriving as "(no reply)". Conversation turns need answers, not
+      // deliberation.
       remoteAgentRef.current = new Agent({
         engine,
         systemPrompt: REMOTE_SYSTEM_PROMPT,
         maxTokens: REMOTE_MAX_TOKENS,
+        enableThinking: false,
       });
       conversationAgentRef.current = new Agent({
         engine,
         systemPrompt: CONVERSATION_SYSTEM_PROMPT,
         maxTokens: REMOTE_MAX_TOKENS,
-        // A tiny model at default temperature parrots its prompt; running the
-        // sampler hotter is what gets it to produce a take of its own.
+        // A small model at default temperature parrots its prompt; running
+        // the sampler hotter is what gets it to produce a take of its own.
         temperature: 0.9,
+        enableThinking: false,
       });
       setStatus('ready');
     } catch (e) {

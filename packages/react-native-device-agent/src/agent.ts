@@ -19,6 +19,13 @@ export interface AgentOptions {
   /** Per-completion generation cap (llama.rn n_predict). Default 512. */
   maxTokens?: number;
   /**
+   * Whether the model may open a reasoning block before answering. Defaults
+   * to the engine's behavior (on). Turn off for short conversational agents:
+   * a hybrid-reasoning model can spend the entire token budget thinking and
+   * return an empty visible answer.
+   */
+  enableThinking?: boolean;
+  /**
    * Token budget for the whole context window. Prompts are trimmed (oldest
    * turns first) to `contextTokens - maxTokens` before each completion.
    * Default: the engine's n_ctx.
@@ -68,6 +75,7 @@ export class Agent {
   private contextTokens: number;
   private charsPerToken: number;
   private maxToolResultChars: number;
+  private enableThinking?: boolean;
   private history: ChatMessage[] = [];
 
   constructor(options: AgentOptions) {
@@ -80,6 +88,7 @@ export class Agent {
     this.contextTokens = options.contextTokens ?? options.engine.contextSize;
     this.charsPerToken = options.charsPerToken ?? 4;
     this.maxToolResultChars = options.maxToolResultChars ?? 8000;
+    this.enableThinking = options.enableThinking;
     if (this.contextTokens - this.maxTokens <= 0) {
       throw new Error(
         `contextTokens (${this.contextTokens}) must be larger than maxTokens ` +
@@ -138,6 +147,7 @@ export class Agent {
           tools: specs.length ? specs : undefined,
           temperature: this.temperature,
           n_predict: this.maxTokens,
+          enableThinking: this.enableThinking,
           signal,
           onToken: (text) => emit({ type: 'token', text }),
         }));
