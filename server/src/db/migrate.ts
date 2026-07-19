@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import postgres from 'postgres';
 import { buildConfig } from '../config.js';
@@ -20,7 +20,14 @@ async function migrate(): Promise<void> {
       )
     `;
 
-    const dir = path.resolve(process.cwd(), 'db/migrations');
+    // Container images copy migrations to db/migrations; the repo keeps them
+    // in src/db/migrations. Support both so npm run migrate works locally.
+    const candidates = ['db/migrations', 'src/db/migrations']
+      .map((p) => path.resolve(process.cwd(), p));
+    const dir = candidates.find((p) => existsSync(p));
+    if (!dir) {
+      throw new Error(`no migrations directory found (looked in: ${candidates.join(', ')})`);
+    }
     const files = readdirSync(dir)
       .filter((f) => f.endsWith('.sql'))
       .sort();
