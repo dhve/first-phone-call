@@ -15,6 +15,12 @@ export interface AgentOptions {
   /** Safety cap on tool-call/think iterations per run. Default 8. */
   maxSteps?: number;
   temperature?: number;
+  /**
+   * Cap on tokens generated per turn. The engine's default of 512 is a long
+   * way past a short answer, and on a phone every token past the point the
+   * model had finished is latency the user waits through.
+   */
+  maxTokens?: number;
 }
 
 export interface RunOptions {
@@ -41,6 +47,7 @@ export class Agent {
   private systemPrompt: string;
   private maxSteps: number;
   private temperature: number;
+  private maxTokens?: number;
   private history: ChatMessage[] = [];
 
   constructor(options: AgentOptions) {
@@ -49,6 +56,7 @@ export class Agent {
     this.systemPrompt = options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.maxSteps = options.maxSteps ?? 8;
     this.temperature = options.temperature ?? 0.7;
+    this.maxTokens = options.maxTokens;
     this.history = [{ role: 'system', content: this.systemPrompt }];
   }
 
@@ -87,6 +95,7 @@ export class Agent {
       const { content, toolCalls } = await this.engine.chat(this.history, {
         tools: specs.length ? specs : undefined,
         temperature: this.temperature,
+        n_predict: this.maxTokens,
         onToken: (text) => emit({ type: 'token', text }),
       });
 

@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { MODEL } from './config';
+import { CONVERSATION_MAX_TURNS, MODEL, signalsAgreement } from './config';
 import { isModelDownloaded } from './modelManager';
 import { discoverRelay } from './relayDiscovery';
 import { loadRelayUrl, saveRelayUrl } from './relayStore';
@@ -28,6 +28,8 @@ export function DeviceAgentApp() {
     initialize,
     send,
     answerRemote,
+    converseTurn,
+    resetConversation,
     appendLine,
     idle,
   } = useAgent();
@@ -53,6 +55,9 @@ export function DeviceAgentApp() {
     appendLine('tool', `🔗 relay set to ${next}`);
   };
   const [calling, setCalling] = useState(false);
+  const [conversing, setConversing] = useState(false);
+  /** Lets the Stop button break the loop between turns. */
+  const stopRef = useRef(false);
 
   const inbox = usePhoneInbox({
     relayUrl,
@@ -62,7 +67,8 @@ export function DeviceAgentApp() {
   });
 
   const peerId = inbox.pairing?.peerId ?? null;
-  const canCall = status === 'ready' && !calling && !!peerId;
+  const canCall = status === 'ready' && !calling && !conversing && !!peerId;
+  const canTalk = status === 'ready' && !calling && !conversing && !!peerId;
 
   useEffect(() => {
     listRef.current?.scrollToEnd({ animated: true });
@@ -124,6 +130,74 @@ export function DeviceAgentApp() {
       appendLine('tool', `⚠️  call failed: ${res.error}`);
     }
     setCalling(false);
+  };
+
+  /**
+   * Hand a question to the two agents and let them talk until they settle it.
+   *
+   * Each round is: our agent speaks, the peer answers over the relay, and its
+   * answer becomes the prompt for our next line. It ends when either side
+   * signals agreement, when the turn cap is hit, or when the user stops it.
+   * The cap is not a formality — a 0.6B model follows the agreement
+   * instruction unreliably, so most runs end by running out of turns.
+   */
+  const onTalk = async () => {
+    const topic = input.trim();
+    if (!topic || conversing || !peerId || !inbox.pairing) return;
+    setInput('');
+    setConversing(true);
+    stopRef.current = false;
+    resetConversation();
+
+    const me = `agent-${inbox.pairing.agentId}`;
+    const peerName = inbox.pairing.peerName ?? 'other agent';
+    appendLine('tool', `🎙️  topic: ${topic}`);
+
+    try {
+      let line = await converseTurn(
+        `Another agent is on the line. Open the conversation about this, in one or two sentences: ${topic}`,
+      );
+
+      for (let turn = 1; turn <= CONVERSATION_MAX_TURNS; turn++) {
+        if (stopRef.current) {
+          appendLine('tool', '⏹️  stopped');
+          return;
+        }
+
+        appendLine('user', `📱 me → ${peerName}: ${line}`);
+        const res = await callPeerAgent({ relayUrl, peerId, message: line, from: me });
+        if (!res.ok) {
+          appendLine('tool', `⚠️  call failed: ${res.error}`);
+          return;
+        }
+        appendLine('assistant', `📞 ${peerName}: ${res.reply}`);
+
+        if (signalsAgreement(res.reply)) {
+          appendLine('tool', `🤝 agreed after ${turn} turn${turn === 1 ? '' : 's'}`);
+          return;
+        }
+        if (turn === CONVERSATION_MAX_TURNS) {
+          appendLine('tool', `⏱️  stopped at the ${CONVERSATION_MAX_TURNS}-turn limit`);
+          return;
+        }
+        if (stopRef.current) {
+          appendLine('tool', '⏹️  stopped');
+          return;
+        }
+
+        line = await converseTurn(res.reply);
+        if (signalsAgreement(line)) {
+          appendLine('user', `📱 me → ${peerName}: ${line}`);
+          await callPeerAgent({ relayUrl, peerId, message: line, from: me });
+          appendLine('tool', `🤝 agreed after ${turn} turn${turn === 1 ? '' : 's'}`);
+          return;
+        }
+      }
+    } catch (e) {
+      appendLine('tool', `⚠️  conversation failed: ${(e as Error).message}`);
+    } finally {
+      setConversing(false);
+    }
   };
 
   const onSend = () => {
@@ -204,6 +278,19 @@ export function DeviceAgentApp() {
               placeholderTextColor="#9ca3af"
               multiline
             />
+            {conversing ? (
+              <Pressable style={styles.stopBtn} onPress={() => (stopRef.current = true)}>
+                <Text style={styles.sendText}>Stop</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={[styles.talkBtn, !canTalk && styles.sendBtnDisabled]}
+                onPress={onTalk}
+                disabled={!canTalk}
+              >
+                <Text style={styles.sendText}>Talk</Text>
+              </Pressable>
+            )}
             <Pressable
               style={[styles.callBtn, !canCall && styles.sendBtnDisabled]}
               onPress={onCallPeer}
@@ -348,6 +435,22 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: '700', color: '#0f172a' },
   subtitle: { fontSize: 13, color: '#64748b', marginTop: 2 },
   relayToggle: { fontSize: 13, color: '#2563eb', fontWeight: '600' },
+  talkBtn: {
+    backgroundColor: '#7c3aed',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  stopBtn: {
+    backgroundColor: '#dc2626',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
   relayPanel: {
     backgroundColor: '#fff',
     paddingHorizontal: 16,

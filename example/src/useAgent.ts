@@ -6,7 +6,15 @@ import {
   defineTool,
   createBuiltinTools,
 } from 'react-native-device-agent';
-import { MODEL, REMOTE_SYSTEM_PROMPT, SYSTEM_PROMPT, stripThinking } from './config';
+import {
+  CONVERSATION_MAX_TURNS,
+  CONVERSATION_SYSTEM_PROMPT,
+  MODEL,
+  REMOTE_MAX_TOKENS,
+  REMOTE_SYSTEM_PROMPT,
+  SYSTEM_PROMPT,
+  stripThinking,
+} from './config';
 import { ensureModel } from './modelManager';
 
 export type Status = 'idle' | 'downloading' | 'loading' | 'ready' | 'thinking' | 'error';
@@ -32,6 +40,17 @@ export function useAgent() {
    * never appears in — or contaminates — the local user's conversation.
    */
   const remoteAgentRef = useRef<Agent | null>(null);
+  /** Agent that argues this device's side when driving a conversation. */
+  const conversationAgentRef = useRef<Agent | null>(null);
+  /**
+   * Who we are currently talking to, and how many turns in. History is kept
+   * across calls from the same caller — otherwise the far agent forgets the
+   * argument between every message and cannot converge on anything — but is
+   * dropped when a different caller appears, so one conversation never leaks
+   * into another's context.
+   */
+  const remoteCallerRef = useRef<string | null>(null);
+  const remoteTurnsRef = useRef(0);
 
   const append = useCallback((role: UIMessage['role'], text: string) => {
     const id = nextId();
@@ -81,6 +100,12 @@ export function useAgent() {
         engine,
         registry,
         systemPrompt: REMOTE_SYSTEM_PROMPT,
+        maxTokens: REMOTE_MAX_TOKENS,
+      });
+      conversationAgentRef.current = new Agent({
+        engine,
+        systemPrompt: CONVERSATION_SYSTEM_PROMPT,
+        maxTokens: REMOTE_MAX_TOKENS,
       });
       setStatus('ready');
     } catch (e) {
@@ -153,16 +178,44 @@ export function useAgent() {
   /**
    * Answer a message that arrived from another agent via the relay.
    *
-   * Each call starts from a clean history: these are one-shot agent-to-agent
-   * exchanges, and carrying context across callers would both leak one
-   * caller's conversation into another's and overflow the 4k window.
+   * History is kept for as long as the same agent keeps calling, so a
+   * back-and-forth actually builds on itself — without that, the far side
+   * restates its opening position forever and never converges. It resets when
+   * a different caller appears, and again after enough turns that the 4k
+   * window would otherwise be at risk.
    */
-  const answerRemote = useCallback(async (text: string): Promise<string> => {
+  const answerRemote = useCallback(async (text: string, from: string): Promise<string> => {
     const agent = remoteAgentRef.current;
     if (!agent) throw new Error('model not loaded yet');
-    agent.reset();
+
+    const newCaller = remoteCallerRef.current !== from;
+    const tooLong = remoteTurnsRef.current >= CONVERSATION_MAX_TURNS * 2;
+    if (newCaller || tooLong) {
+      agent.reset();
+      remoteCallerRef.current = from;
+      remoteTurnsRef.current = 0;
+    }
+    remoteTurnsRef.current += 1;
+
     const raw = await agent.send(text);
     return stripThinking(raw) || '(no reply)';
+  }, []);
+
+  /**
+   * Produce this device's next line in a conversation with another agent.
+   * Unlike `send`, nothing is written to the transcript here — the caller
+   * decides how to display a turn it is also relaying over the network.
+   */
+  const converseTurn = useCallback(async (text: string): Promise<string> => {
+    const agent = conversationAgentRef.current;
+    if (!agent) throw new Error('model not loaded yet');
+    const raw = await agent.send(text);
+    return stripThinking(raw) || '(no reply)';
+  }, []);
+
+  /** Begin a fresh conversation, discarding any previous one. */
+  const resetConversation = useCallback(() => {
+    conversationAgentRef.current?.reset();
   }, []);
 
   /** Append a line to the transcript from outside the chat flow. */
@@ -182,6 +235,8 @@ export function useAgent() {
     initialize,
     send,
     answerRemote,
+    converseTurn,
+    resetConversation,
     appendLine,
     idle,
   };
