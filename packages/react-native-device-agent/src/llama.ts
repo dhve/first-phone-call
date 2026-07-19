@@ -22,6 +22,11 @@ export interface ChatOptions {
   temperature?: number;
   n_predict?: number;
   stop?: string[];
+  /**
+   * Abort signal for this completion. When it fires, the active llama.rn
+   * completion is stopped and `chat()` rejects with an `AbortError`.
+   */
+  signal?: AbortSignal;
   /** Streaming callback for each generated token of the visible text. */
   onToken?: (text: string) => void;
 }
@@ -39,9 +44,15 @@ export interface ChatResult {
  */
 export class LlamaEngine {
   private ctx: Awaited<ReturnType<typeof initLlama>> | null = null;
+  private ctxSize = 4096;
 
   get isLoaded(): boolean {
     return this.ctx !== null;
+  }
+
+  /** Context window size (n_ctx) the model was loaded with. */
+  get contextSize(): number {
+    return this.ctxSize;
   }
 
   static async load(options: LlamaLoadOptions): Promise<LlamaEngine> {
@@ -52,13 +63,27 @@ export class LlamaEngine {
 
   async loadModel(options: LlamaLoadOptions): Promise<void> {
     if (this.ctx) await this.release();
+    this.ctxSize = options.n_ctx ?? 4096;
     this.ctx = await initLlama({
       model: options.model,
-      n_ctx: options.n_ctx ?? 4096,
+      n_ctx: this.ctxSize,
       n_gpu_layers: options.n_gpu_layers ?? 99,
       use_mlock: options.use_mlock ?? true,
       ...(options.extra ?? {}),
     });
+  }
+
+  /**
+   * Stop the active completion, if any. Safe to call at any time; the
+   * in-flight `chat()` settles promptly with whatever was generated so far.
+   */
+  async stop(): Promise<void> {
+    if (!this.ctx) return;
+    try {
+      await this.ctx.stopCompletion();
+    } catch {
+      // No active completion (or the context is tearing down); nothing to stop.
+    }
   }
 
   /**
@@ -67,27 +92,39 @@ export class LlamaEngine {
    */
   async chat(messages: ChatMessage[], options: ChatOptions = {}): Promise<ChatResult> {
     if (!this.ctx) throw new Error('Model not loaded. Call loadModel() first.');
+    throwIfAborted(options.signal);
 
-    const hasTools = !!options.tools?.length;
-    const result: any = await this.ctx.completion(
-      {
-        messages,
-        ...(hasTools
-          ? { tools: options.tools, tool_choice: options.toolChoice ?? 'auto', jinja: true }
-          : {}),
-        temperature: options.temperature ?? 0.7,
-        n_predict: options.n_predict ?? 512,
-        stop: options.stop,
-      },
-      (data: { token?: string }) => {
-        if (data?.token && options.onToken) options.onToken(data.token);
-      },
-    );
-
-    return {
-      content: (result?.content ?? result?.text ?? '').trim(),
-      toolCalls: normalizeToolCalls(result?.tool_calls),
+    const onAbort = () => {
+      void this.stop();
     };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      const hasTools = !!options.tools?.length;
+      const result: any = await this.ctx.completion(
+        {
+          messages,
+          ...(hasTools
+            ? { tools: options.tools, tool_choice: options.toolChoice ?? 'auto', jinja: true }
+            : {}),
+          temperature: options.temperature ?? 0.7,
+          n_predict: options.n_predict ?? 512,
+          stop: options.stop,
+        },
+        (data: { token?: string }) => {
+          if (options.onToken && typeof data?.token === 'string') options.onToken(data.token);
+        },
+      );
+      // A stopped completion resolves with partial output; surface the abort.
+      throwIfAborted(options.signal);
+
+      return {
+        content: (result?.content ?? result?.text ?? '').trim(),
+        toolCalls: normalizeToolCalls(result?.tool_calls),
+      };
+    } finally {
+      options.signal?.removeEventListener('abort', onAbort);
+    }
   }
 
   async release(): Promise<void> {
@@ -96,6 +133,16 @@ export class LlamaEngine {
       this.ctx = null;
     }
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  if (typeof DOMException === 'function') {
+    throw new DOMException('Completion aborted', 'AbortError');
+  }
+  const err = new Error('Completion aborted');
+  err.name = 'AbortError';
+  throw err;
 }
 
 /** llama.rn may omit call ids; normalize into our ToolCall shape. */

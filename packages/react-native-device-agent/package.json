@@ -12,6 +12,7 @@
     "README.md"
   ],
   "scripts": {
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "echo 'TODO: react-native-builder-bob before publish' && tsc --noEmit"
   },
@@ -54,6 +55,7 @@
   },
   "devDependencies": {
     "llama.rn": "^0.12.6",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
   "dependencies": {
