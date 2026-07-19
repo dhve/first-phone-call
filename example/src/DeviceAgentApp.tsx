@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MODEL } from './config';
+import { isModelDownloaded } from './modelManager';
 import { DEFAULT_RELAY_URL } from './relayConfig';
 import { useAgent, type UIMessage } from './useAgent';
 import { callPeerAgent, usePhoneInbox } from './usePhoneInbox';
@@ -51,6 +52,14 @@ export function DeviceAgentApp() {
   useEffect(() => {
     listRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
+
+  // Auto-load when the model is already on disk, so a device comes back up
+  // listening after a restart instead of waiting for someone to tap a button.
+  // The first run still shows the gate, since a ~370 MB download on someone
+  // else's data plan should be a deliberate choice.
+  useEffect(() => {
+    if (status === 'idle' && isModelDownloaded()) initialize();
+  }, [status, initialize]);
 
   const ready = status === 'ready' || status === 'thinking';
 

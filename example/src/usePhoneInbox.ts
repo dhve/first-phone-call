@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { deviceId, deviceName } from './deviceIdentity';
 import { INBOX_POLL_MS, PAIR_POLL_MS } from './relayConfig';
 
 export type InboxStatus = 'off' | 'pairing' | 'listening' | 'answering' | 'error';
@@ -28,14 +28,6 @@ interface InboxItem {
   message: string;
   from: string;
 }
-
-/**
- * A per-install identity. Re-registering with the same value reclaims the same
- * lane, so hot-reloading the app doesn't consume the second slot and strand
- * the real peer. Module scope (not per-render) so it survives re-mounts.
- */
-const DEVICE_ID = `${Platform.OS}-${Math.random().toString(36).slice(2, 10)}`;
-const DEVICE_NAME = Platform.OS === 'android' ? 'Android agent' : 'Device agent';
 
 /**
  * Registers this device with the relay, then polls its own lane, answers each
@@ -76,7 +68,7 @@ export function usePhoneInbox(options: InboxOptions) {
         const res = await fetch(`${base}/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deviceId: DEVICE_ID, name: DEVICE_NAME }),
+          body: JSON.stringify({ deviceId: deviceId(), name: deviceName() }),
         });
         if (!res.ok) throw new Error(`register returned ${res.status}`);
         const body = (await res.json()) as Pairing;
