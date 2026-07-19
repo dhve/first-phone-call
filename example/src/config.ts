@@ -48,7 +48,7 @@ export const CONSUME_TRANSCRIPTION = true;
 
 /**
  * Whisper model. base.en (q5_1, ~60 MB) over tiny.en: the transcription feeds
- * a 270M LLM that derails on garbled input, so accuracy wins over 30 MB.
+ * a small LLM that derails on garbled input, so accuracy wins over 30 MB.
  * SHA-256 values are the Hugging Face lfs.oid for each file at
  * https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main
  * (fetched 2026-07-19).

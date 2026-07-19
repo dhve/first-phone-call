@@ -253,7 +253,25 @@ export function useAudioCall(options: UseAudioCallOptions) {
   const handleTurn = useCallback(
     async (item: CallInboxItem) => {
       const session = sessionRef.current;
-      if (!session || item.sessionId !== session.id) return;
+      if (!session || item.sessionId !== session.id) {
+        // A turn for a call this phone no longer remembers: the app died and
+        // came back mid-call. Acking it silently would leave the peer waiting
+        // out the idle sweep; telling the relay to hang up ends it cleanly.
+        try {
+          const lane = laneRef.current;
+          if (lane) {
+            await fetch(`${base}/call/hangup`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId: item.sessionId, from: lane, reason: 'lost-state' }),
+            });
+          }
+        } catch {
+          // The relay may have swept it already; the ack below still clears it.
+        }
+        emit('📴 dropped a turn from a call this phone no longer remembers');
+        return;
+      }
       setCall((c) => ({ ...c, phase: 'active', activeState: 'listening', turnNo: item.turnNo ?? c.turnNo }));
 
       const sent = item.debugText ?? '';

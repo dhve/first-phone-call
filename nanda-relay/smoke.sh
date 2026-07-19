@@ -46,3 +46,9 @@ done
 
 echo
 echo "All green. Both phones are listening and answering."
+
+# --- audio call smoke: one synthesized turn, end to end -----------------------
+echo
+echo "TTS turn (writes /tmp/smoke-turn.wav; play it to hear lane A's voice):"
+curl -s "$BASE/tts?text=Smoke%20test%3A%20this%20is%20the%20relay%20speaking&lane=a" \
+  -o /tmp/smoke-turn.wav && file /tmp/smoke-turn.wav
