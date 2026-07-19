@@ -80,6 +80,36 @@ export const MIN_TURNS_BEFORE_AGREEMENT = 3;
 /** Hard stop, so a pair of agents cannot talk forever on stage. */
 export const CONVERSATION_MAX_TURNS = 8;
 
+/** Compare two replies ignoring case, punctuation and spacing. */
+function normalize(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/**
+ * Did the model just parrot what it was given?
+ *
+ * A small model will echo its prompt verbatim, and once that echo is in its
+ * history it does it again — two agents then trade the identical sentence
+ * until the turn cap. Catching it needs an explicit check; nothing about the
+ * text itself looks wrong.
+ */
+export function isEcho(reply: string, prompt: string): boolean {
+  const a = normalize(reply);
+  const b = normalize(prompt);
+  if (!a || !b) return false;
+  if (a === b) return true;
+
+  // Exact comparison is not enough: the model reproduces the sentence with a
+  // word added or dropped ("First call on Internet" -> "First call on the
+  // Internet"), which reads as an echo but does not match. Compare overlap.
+  const wordsA = new Set(a.split(' '));
+  const wordsB = new Set(b.split(' '));
+  let shared = 0;
+  for (const w of wordsA) if (wordsB.has(w)) shared++;
+  const union = new Set([...wordsA, ...wordsB]).size;
+  return union > 0 && shared / union >= 0.7;
+}
+
 /** Has an agent signalled it is done? */
 export function signalsAgreement(text: string): boolean {
   return new RegExp(`\\b${AGREEMENT_MARKER}\\b`, 'i').test(text);

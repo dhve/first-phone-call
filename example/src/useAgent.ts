@@ -13,6 +13,7 @@ import {
   REMOTE_MAX_TOKENS,
   REMOTE_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
+  isEcho,
   stripThinking,
 } from './config';
 import { ensureModel } from './modelManager';
@@ -218,8 +219,29 @@ export function useAgent() {
     }
     remoteTurnsRef.current += 1;
 
-    const raw = await withEngine(() => agent.send(text));
-    return stripThinking(raw) || '(no reply)';
+    let reply = stripThinking(await withEngine(() => agent.send(text)));
+
+    // Parroting the prompt back is the failure mode of a small model in a long
+    // exchange, and it feeds itself: the echo lands in history and makes the
+    // next echo likelier. Drop that history and ask once more, plainly.
+    if (isEcho(reply, text)) {
+      agent.reset();
+      remoteCallerRef.current = from;
+      remoteTurnsRef.current = 1;
+      reply = stripThinking(
+        await withEngine(() =>
+          agent.send(
+            `Answer this in your own words, in one or two sentences. Do not ` +
+              `repeat it back. Message: ${text}`,
+          ),
+        ),
+      );
+      if (isEcho(reply, text)) {
+        return 'Sorry — I could not add anything useful to that.';
+      }
+    }
+
+    return reply || '(no reply)';
   }, [withEngine]);
 
   /**

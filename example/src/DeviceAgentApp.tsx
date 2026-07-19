@@ -17,6 +17,7 @@ import {
   CONVERSATION_MAX_TURNS,
   MIN_TURNS_BEFORE_AGREEMENT,
   MODEL,
+  isEcho,
   signalsAgreement,
 } from './config';
 import { isModelDownloaded } from './modelManager';
@@ -249,7 +250,16 @@ export function DeviceAgentApp() {
           return;
         }
 
+        const previous = line;
         line = await converseTurn(res.reply);
+
+        // Going in circles is worse than stopping. Two agents can lock onto
+        // one sentence and trade it until the cap, which reads as broken.
+        if (isEcho(line, previous) || isEcho(line, res.reply)) {
+          appendLine('tool', '🔁 they started repeating themselves — stopped');
+          return;
+        }
+
         if (turn >= MIN_TURNS_BEFORE_AGREEMENT && signalsAgreement(line)) {
           appendLine('user', `📱 me → ${peerName}: ${line}`);
           await callPeerAgent({ relayUrl, peerId, message: line, from: me });
