@@ -4,8 +4,9 @@
  * Phones cannot accept inbound HTTP, so callers POST /run here and the phone
  * long-polls GET /inbox for work, then POSTs the answer to /outbox.
  *
- * This process performs NO inference and calls NO LLM API. It stores and
- * forwards messages, nothing else. All state is in memory and dies with it.
+ * This process performs NO inference and calls NO LLM API. Its one outbound
+ * dependency is Microsoft Edge TTS, used to synthesize call turns to speech
+ * so the phones need only LAN access. All state is in memory and dies with it.
  *
  *   npx tsx relay.ts
  */
@@ -110,6 +111,104 @@ function peerOf(id: string): Agent | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Call sessions - ring, answer, spoken turns, hangup
+// ---------------------------------------------------------------------------
+
+type CallSessionState = 'ringing' | 'active' | 'ended';
+
+interface CallSession {
+  id: string;
+  caller: string;
+  callee: string;
+  state: CallSessionState;
+  createdAt: number;
+  lastActivityAt: number;
+  /** Count of spoken turns so far; stamped onto each turn item. */
+  turnNo: number;
+}
+
+const sessions = new Map<string, CallSession>();
+/** How long a call may ring before the relay gives up for the caller. */
+const RING_TIMEOUT_MS = Number(process.env.RING_TIMEOUT_MS ?? 30_000);
+/** Sessions with no activity this long are swept; demos never pause 5 min. */
+const SESSION_IDLE_MS = Number(process.env.SESSION_IDLE_MS ?? 5 * 60_000);
+
+/**
+ * Synthesized turn audio, by id, fetched once by the receiving phone.
+ * Kept out of the inbox JSON on purpose: a WAV would blow the 1 MB body
+ * limit, and the phone only needs the bytes once.
+ */
+const audioStore = new Map<string, { wav: Buffer; at: number }>();
+const AUDIO_TTL_MS = Number(process.env.AUDIO_TTL_MS ?? 5 * 60_000);
+
+/**
+ * Typed call items delivered through the same inbox as legacy text calls.
+ * Items keep the hand-out-once + requeue-if-stale discipline that took real
+ * debugging to get right for /run; the completion signal here is POST /ack
+ * instead of /outbox, because call items have no blocked HTTP caller.
+ */
+interface CallItem {
+  id: string;
+  /** Lane this item is addressed to. */
+  to: string;
+  kind: 'offer' | 'accept' | 'turn' | 'hangup';
+  sessionId: string;
+  status: 'queued' | 'in-flight' | 'done';
+  handedAt?: number;
+  /** offer only */
+  fromName?: string;
+  /** turn only */
+  turnNo?: number;
+  audioId?: string | null;
+  debugText?: string;
+  /** hangup only */
+  reason?: string;
+}
+
+const callItems: CallItem[] = [];
+
+function queueItem(item: Omit<CallItem, 'id' | 'status'>): CallItem {
+  const full: CallItem = { ...item, id: randomUUID(), status: 'queued' };
+  callItems.push(full);
+  return full;
+}
+
+function touchSession(session: CallSession): void {
+  session.lastActivityAt = Date.now();
+}
+
+function endSession(session: CallSession, reason: string, notify: string[]): void {
+  if (session.state === 'ended') return;
+  session.state = 'ended';
+  touchSession(session);
+  // Anything still queued for this call is moot once it is over.
+  for (const item of callItems) {
+    if (item.sessionId === session.id && item.status !== 'done' && item.kind !== 'hangup') {
+      item.status = 'done';
+    }
+  }
+  for (const lane of notify) {
+    queueItem({ to: lane, kind: 'hangup', sessionId: session.id, reason });
+  }
+  log('HUNG UP', `${reason} (${session.caller} <-> ${session.callee})`, session.id);
+}
+
+/** Ringing timeouts, idle sessions, and expired audio, in one sweep. */
+setInterval(() => {
+  const now = Date.now();
+  for (const session of sessions.values()) {
+    if (session.state === 'ringing' && now - session.createdAt > RING_TIMEOUT_MS) {
+      endSession(session, 'no-answer', [session.caller, session.callee]);
+    } else if (session.state !== 'ended' && now - session.lastActivityAt > SESSION_IDLE_MS) {
+      endSession(session, 'idle-timeout', [session.caller, session.callee]);
+    }
+  }
+  for (const [id, entry] of audioStore) {
+    if (now - entry.at > AUDIO_TTL_MS) audioStore.delete(id);
+  }
+}, 5_000).unref();
+
 interface LogEvent {
   at: string;
   kind: string;
@@ -163,7 +262,7 @@ app.get('/agent-card', (_req: Request, res: Response) => {
     protocolVersion: '0.2.0',
     name: AGENT_NAME,
     description:
-      'An AI agent running entirely on an Android phone (Qwen3-0.6B via llama.rn). ' +
+      'An AI agent running entirely on an Android phone (Gemma 3 270M via llama.rn). ' +
       'Reached through a store-and-forward relay because phones cannot accept inbound HTTP.',
     url: `${PUBLIC_URL}/run`,
     version: '0.1.0',
@@ -310,6 +409,33 @@ app.get('/inbox', (req: Request, res: Response) => {
     }
   }
 
+  // Typed call items follow the same discipline, with /ack as the completion
+  // signal and the session having to still be live to be worth redelivering.
+  for (const item of callItems) {
+    if (
+      item.status === 'in-flight' &&
+      sessions.get(item.sessionId)?.state !== 'ended' &&
+      now - (item.handedAt ?? now) > REQUEUE_AFTER_MS
+    ) {
+      item.status = 'queued';
+      log('ITEM REQUEUED', `${item.kind} went unacked; offering again`, item.sessionId);
+    }
+  }
+
+  // Call items outrank legacy text calls: a ringing phone should ring now,
+  // not after a queued trivia question drains.
+  const nextItem = callItems.find((i) => i.status === 'queued' && i.to === agentId);
+  if (nextItem) {
+    nextItem.status = 'in-flight';
+    nextItem.handedAt = Date.now();
+    if (nextItem.kind === 'offer') {
+      log('RINGING', `lane ${nextItem.to} is ringing (${nextItem.fromName})`, nextItem.sessionId);
+    }
+    const { status: _s, handedAt: _h, to: _t, ...wire } = nextItem;
+    res.json(wire);
+    return;
+  }
+
   const next = calls.find(
     (c) => c.status === 'queued' && (!agentId || c.to === agentId),
   );
@@ -354,6 +480,169 @@ app.post('/outbox', (req: Request, res: Response) => {
 
   waiter(reply);
   res.json({ ok: true, delivered: true });
+});
+
+// ---------------------------------------------------------------------------
+// Call routes - ring, answer, spoken turns, hangup
+// ---------------------------------------------------------------------------
+
+function laneOf(req: Request): string {
+  return typeof req.body?.from === 'string' ? req.body.from : '';
+}
+
+function sessionOf(req: Request, res: Response): CallSession | null {
+  const id = typeof req.body?.sessionId === 'string' ? req.body.sessionId : '';
+  const session = sessions.get(id);
+  if (!session) {
+    res.status(404).json({ error: `unknown sessionId ${id}` });
+    return null;
+  }
+  return session;
+}
+
+/** A phone dials its peer. The peer's inbox rings; ours waits for accept. */
+app.post('/call/offer', (req: Request, res: Response) => {
+  const from = laneOf(req);
+  const caller = agents.get(from);
+  if (!caller) {
+    res.status(400).json({ error: '"from" must be a registered lane' });
+    return;
+  }
+  const peer = peerOf(from);
+  if (!peer) {
+    res.status(409).json({ error: 'no peer registered yet' });
+    return;
+  }
+  // One live call at a time: a new offer while another session is ringing or
+  // active would interleave two conversations on the same two phones.
+  for (const s of sessions.values()) {
+    if (s.state !== 'ended') {
+      res.status(409).json({ error: `session ${s.id} is still ${s.state}`, sessionId: s.id });
+      return;
+    }
+  }
+
+  const session: CallSession = {
+    id: randomUUID(),
+    caller: from,
+    callee: peer.id,
+    state: 'ringing',
+    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
+    turnNo: 0,
+  };
+  sessions.set(session.id, session);
+  queueItem({ to: peer.id, kind: 'offer', sessionId: session.id, fromName: caller.name });
+  log('CALL OFFERED', `${caller.name} (${from}) is calling ${peer.name} (${peer.id})`, session.id);
+  res.json({ sessionId: session.id, ringTimeoutMs: RING_TIMEOUT_MS });
+});
+
+/** The ringing phone answers. The caller's inbox learns and speaks first. */
+app.post('/call/accept', (req: Request, res: Response) => {
+  const session = sessionOf(req, res);
+  if (!session) return;
+  const from = laneOf(req);
+  if (from !== session.callee) {
+    res.status(403).json({ error: 'only the callee can accept' });
+    return;
+  }
+  if (session.state !== 'ringing') {
+    res.status(409).json({ error: `session is ${session.state}, not ringing` });
+    return;
+  }
+  session.state = 'active';
+  touchSession(session);
+  queueItem({ to: session.caller, kind: 'accept', sessionId: session.id });
+  log('ANSWERED', `${agents.get(from)?.name ?? from} picked up`, session.id);
+  res.json({ ok: true });
+});
+
+/**
+ * A spoken turn. The relay synthesizes the text to speech (voice keyed by the
+ * SENDING lane, so each agent keeps one recognizable voice) and delivers the
+ * audio by reference. If Edge TTS fails twice the turn still goes through
+ * with audioId null and the receiver falls back to the text.
+ */
+app.post('/call/turn', async (req: Request, res: Response) => {
+  const session = sessionOf(req, res);
+  if (!session) return;
+  const from = laneOf(req);
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (from !== session.caller && from !== session.callee) {
+    res.status(403).json({ error: '"from" is not part of this call' });
+    return;
+  }
+  if (session.state !== 'active') {
+    res.status(409).json({ error: `session is ${session.state}, not active` });
+    return;
+  }
+  if (!text) {
+    res.status(400).json({ error: 'body must include a non-empty "text" string' });
+    return;
+  }
+
+  touchSession(session);
+  const to = from === session.caller ? session.callee : session.caller;
+  session.turnNo += 1;
+  const turnNo = session.turnNo;
+
+  let audioId: string | null = null;
+  try {
+    const wav = await speakTurn(text, from);
+    audioId = randomUUID();
+    audioStore.set(audioId, { wav, at: Date.now() });
+    log('TURN SPOKEN', `turn ${turnNo} by ${from}: "${preview(text)}" (${wav.length} bytes)`, session.id);
+  } catch (e) {
+    log('TTS FAILED', `turn ${turnNo} degrades to text: ${(e as Error).message}`, session.id);
+  }
+
+  touchSession(session);
+  queueItem({ to, kind: 'turn', sessionId: session.id, turnNo, audioId, debugText: text });
+  res.json({ ok: true, turnNo, audioId });
+});
+
+/** Either side ends the call; the peer's inbox hears about it. */
+app.post('/call/hangup', (req: Request, res: Response) => {
+  const session = sessionOf(req, res);
+  if (!session) return;
+  const from = laneOf(req);
+  const reason = typeof req.body?.reason === 'string' && req.body.reason ? req.body.reason : 'hangup';
+  const peerLane = from === session.caller ? session.callee : session.caller;
+  endSession(session, reason, [peerLane]);
+  res.json({ ok: true });
+});
+
+/** The receiving phone fetches a turn's synthesized audio exactly once. */
+app.get('/audio/:id', (req: Request, res: Response) => {
+  const id = req.params.id;
+  const entry = audioStore.get(typeof id === 'string' ? id : '');
+  if (!entry) {
+    res.status(404).json({ error: 'unknown or expired audio id' });
+    return;
+  }
+  res.setHeader('Content-Type', 'audio/wav');
+  res.send(entry.wav);
+});
+
+/**
+ * A phone confirms it fully processed a typed inbox item. Until then the
+ * item is redelivered after REQUEUE_AFTER_MS, same as legacy calls, so a
+ * phone dying mid-turn does not silently eat the call.
+ */
+app.post('/ack', (req: Request, res: Response) => {
+  const id = typeof req.body?.messageId === 'string' ? req.body.messageId : '';
+  const item = callItems.find((i) => i.id === id);
+  if (!item) {
+    res.status(404).json({ error: `unknown messageId ${id}` });
+    return;
+  }
+  if (item.status !== 'done') {
+    item.status = 'done';
+    if (item.kind === 'turn') {
+      log('TURN HEARD', `lane ${item.to} finished turn ${item.turnNo}`, item.sessionId);
+    }
+  }
+  res.json({ ok: true });
 });
 
 /**
