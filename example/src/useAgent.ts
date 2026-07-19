@@ -230,7 +230,7 @@ export function useAgent() {
     // A stray <think> block can burn the whole token budget and strip to
     // nothing. One retry with thinking forced off for the turn.
     if (!reply) {
-      reply = stripThinking(await withEngine(() => agent.send(`${text} /no_think`)));
+      reply = stripThinking(await withEngine(() => agent.send(text)));
     }
 
     // Parroting the prompt back is the failure mode of a small model in a long
@@ -268,7 +268,7 @@ export function useAgent() {
       let reply = stripThinking(await withEngine(() => agent.send(text)));
       if (!reply) {
         // Thinking ate the budget; one retry with it off for this turn.
-        reply = stripThinking(await withEngine(() => agent.send(`${text} /no_think`)));
+        reply = stripThinking(await withEngine(() => agent.send(text)));
       }
       return stripAgreementTic(reply) || '(no reply)';
     },

@@ -1,21 +1,22 @@
 /**
  * Demo configuration: which model to download and the agent's behavior.
  *
- * Qwen3-0.6B (Q4_K_M) is the smallest Qwen 3 — ~370 MB, loads in seconds, and
- * runs on modest hardware. Unlike Gemma 3, its chat template DOES support
- * tool calling, which the agent-to-agent flow depends on.
+ * Gemma 3 270M (instruction-tuned, Q8_0) is tiny (~292 MB), loads in a couple
+ * of seconds, and leaves plenty of RAM headroom next to whisper during audio
+ * calls. Its chat template has no tool-calling support, so the local chat
+ * tools degrade on this model; the phone-call flow never calls tools, which is
+ * the trade this demo makes on purpose.
  *
- * Qwen 3 is a hybrid-reasoning model: it can emit <think>...</think> blocks
- * before its answer. Those must never reach the other agent, so replies are
- * stripped (see stripThinking) and the system prompt asks it not to think.
+ * stripThinking is kept even though Gemma does not emit <think> blocks: it is
+ * a no-op on clean output and a guard if the model is swapped again.
  */
 export const MODEL = {
-  /** Single-file GGUF download (unsloth mirror — ungated, no HF token needed). */
-  url: 'https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf',
+  /** Single-file GGUF download (llama.cpp org quant repo). */
+  url: 'https://huggingface.co/ggml-org/gemma-3-270m-it-GGUF/resolve/main/gemma-3-270m-it-Q8_0.gguf',
   /** Local filename to store it as. */
-  fileName: 'Qwen3-0.6B-Q4_K_M.gguf',
+  fileName: 'gemma-3-270m-it-Q8_0.gguf',
   /** Approx download size, for the UI. */
-  sizeLabel: '~370 MB',
+  sizeLabel: '~292 MB',
   /** Context window. */
   nCtx: 4096,
 };
@@ -26,7 +27,7 @@ export const SYSTEM_PROMPT =
   'notifications) or to fetch information. Prefer calling a tool when it lets ' +
   'you actually do what the user asked, rather than describing how. When a ' +
   'tool returns, summarize the outcome for the user in plain language. ' +
-  'Answer directly without showing your reasoning. /no_think';
+  'Answer directly without showing your reasoning.';
 
 /**
  * System prompt used when another AI agent calls this device (not the local
@@ -38,7 +39,7 @@ export const REMOTE_SYSTEM_PROMPT =
   'agent on a different device. Talk the way people talk: short casual ' +
   'sentences, contractions, no markdown, no lists. Have your own take. If ' +
   'you see it differently, push back and say why — do not just agree with ' +
-  'everything. One or two sentences. Do not show reasoning. /no_think';
+  'everything. One or two sentences. Do not show reasoning.';
 
 /**
  * Cap on tokens per agent-to-agent reply.
@@ -70,7 +71,7 @@ export const CONVERSATION_SYSTEM_PROMPT =
   'it differently, concede a point when they earn it, ask a question back ' +
   'now and then. Never open a message with "I agree". Only when the ' +
   'discussion has truly run its course and you both see it the same way, ' +
-  `end your message with the single word ${AGREEMENT_MARKER}. /no_think`;
+  `end your message with the single word ${AGREEMENT_MARKER}.`;
 
 /**
  * Exchanges that must happen before agreement is allowed to end the run.
