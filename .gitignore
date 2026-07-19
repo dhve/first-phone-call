@@ -9,14 +9,30 @@ server/node_modules/
 web/node_modules/
 
 # Build outputs
+dist/
+lib/
+build/
+*.tsbuildinfo
+server/tsconfig.tsbuildinfo
+web/tsconfig.tsbuildinfo
 server/dist/
 web/.next/
 web/out/
 
-# TypeScript
-*.tsbuildinfo
-server/tsconfig.tsbuildinfo
-web/tsconfig.tsbuildinfo
+# Native (React Native / Expo — example app + mobile app)
+ios/Pods/
+ios/build/
+android/.gradle/
+android/build/
+android/app/build/
+*.xcworkspace/xcuserdata/
+.expo/
+.expo-shared/
+web-build/
+
+# Models (large GGUF files — never commit)
+*.gguf
+models/
 
 # Docker volumes (if bind-mounted locally)
 postgres-data/
@@ -30,7 +46,8 @@ Thumbs.db
 npm-debug.log*
 
 # Editor
-.vscode/
 .idea/
 *.swp
 *.swo
+.vscode/*
+!.vscode/extensions.json

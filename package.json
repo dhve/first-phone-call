@@ -2,7 +2,7 @@
   "name": "host39",
   "version": "0.2.0",
   "private": true,
-  "description": "host39 phone agent monorepo: server, web dashboard, Android app, and internal Device Agent package",
+  "description": "host39 phone agent monorepo: server, web dashboard, Android app, and internal Device Agent package, plus a standalone example demo app for the device-agent harness.",
   "engines": {
     "node": ">=20.19.0"
   },
@@ -10,7 +10,8 @@
     "server",
     "web",
     "mobile",
-    "packages/react-native-device-agent"
+    "packages/react-native-device-agent",
+    "example"
   ],
   "scripts": {
     "dev:server": "npm run dev -w server",
@@ -20,6 +21,10 @@
     "build": "npm run build -w server && npm run build -w web",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "migrate": "npm run migrate -w server"
+    "migrate": "npm run migrate -w server",
+    "example:start": "npm run start --workspace example",
+    "example:ios": "npm run ios --workspace example",
+    "example:android": "npm run android --workspace example",
+    "example:web": "npm run web --workspace example"
   }
 }

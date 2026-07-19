@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "Device Agent",
+    "slug": "device-agent-example",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.deviceagent.example",
+      "infoPlist": {
+        "NSContactsUsageDescription": "Lets the on-device agent look up your contacts when you ask it to.",
+        "NSCalendarsUsageDescription": "Lets the on-device agent read and create calendar events when you ask it to.",
+        "NSCalendarsFullAccessUsageDescription": "Lets the on-device agent read and create calendar events when you ask it to.",
+        "NSLocationWhenInUseUsageDescription": "Lets the on-device agent answer questions about your current location."
+      }
+    },
+    "android": {
+      "package": "ai.deviceagent.example",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.READ_CONTACTS",
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "llama.rn",
+        {
+          "enableEntitlements": true,
+          "forceCxx20": true
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.4"
+          },
+          "android": {
+            "minSdkVersion": 26,
+            "extraProguardRules": "-keep class com.rnllama.** { *; }"
+          }
+        }
+      ],
+      "expo-dev-client",
+      "expo-notifications",
+      "expo-contacts",
+      "expo-calendar",
+      "expo-location"
+    ]
+  }
+}

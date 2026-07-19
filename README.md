@@ -503,3 +503,14 @@ curl -s -X POST https://agentcards.host39.org/a2a/personal/nobody@example.com/no
 ```
 
 A phone can then sign in with the production URL, publish, and host; `GET /devices` shows `connected: true` once its relay socket is up.
+
+---
+
+## Also in this repo
+
+| Path | What it is |
+| --- | --- |
+| [`packages/react-native-device-agent`](packages/react-native-device-agent) | The on-device LLM agent harness (llama.rn-based): the agentic loop, tool registry, and batteries-included device/filesystem/network tools. Imported internally per [`UPSTREAM.md`](packages/react-native-device-agent/UPSTREAM.md); consumed by the `mobile` workspace. |
+| [`mobile`](mobile) | The Host39 Android app: runs the device-agent harness locally, signs its own agent card, and relays A2A requests through this server. |
+| [`example`](example) | A standalone Expo demo app for the `react-native-device-agent` harness (chat UI, not part of the `mobile` Host39 app). Run it with the `example:*` npm scripts (`example:start`, `example:ios`, `example:android`, `example:web`). |
+| [`agentfacts.json`](agentfacts.json) | A static AgentFacts / Agent Card describing the `example` demo's configuration. See [`AGENTS.md`](AGENTS.md) for the decisions and known limitations behind it, including why this repo has two unrelated git histories merged together. |
