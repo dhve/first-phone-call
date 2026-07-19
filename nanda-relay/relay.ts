@@ -30,6 +30,8 @@ interface Call {
   id: string;
   message: string;
   from: string;
+  /** Which registered agent this call is addressed to. */
+  to: string;
   status: CallStatus;
   receivedAt: number;
 }
@@ -38,6 +40,61 @@ interface Call {
 const calls: Call[] = [];
 /** id -> resolver for the HTTP request currently blocked in POST /run. */
 const waiters = new Map<string, (reply: string | null) => void>();
+
+// ---------------------------------------------------------------------------
+// Agent registry — so devices pair themselves instead of being configured
+// ---------------------------------------------------------------------------
+
+interface Agent {
+  /** Stable lane name: the first device to register is "a", the second "b". */
+  id: string;
+  /** Caller-supplied identity, used only for logging. */
+  name: string;
+  /** Per-install id, so a reload reclaims the same lane instead of a new one. */
+  deviceId: string;
+  lastSeen: number;
+}
+
+/** Lane -> agent. Capped at two: this is a phone call, not a conference. */
+const agents = new Map<string, Agent>();
+const LANES = ['a', 'b'];
+
+/**
+ * Give a device a lane. Re-registering with the same deviceId returns the same
+ * lane, so hot-reloading the app doesn't consume the second slot and strand
+ * the real peer. When both lanes are taken by other devices, the stalest is
+ * evicted -- during a demo that is always a dead app, never a live one.
+ */
+function registerAgent(deviceId: string, name: string): Agent {
+  for (const agent of agents.values()) {
+    if (agent.deviceId === deviceId) {
+      agent.name = name;
+      agent.lastSeen = Date.now();
+      return agent;
+    }
+  }
+
+  let lane = LANES.find((l) => !agents.has(l));
+  if (!lane) {
+    let stalest: Agent | undefined;
+    for (const agent of agents.values()) {
+      if (!stalest || agent.lastSeen < stalest.lastSeen) stalest = agent;
+    }
+    lane = stalest!.id;
+    log('LANE RECLAIMED', `${lane} was idle, reassigning to ${name}`);
+    agents.delete(lane);
+  }
+
+  const agent: Agent = { id: lane, name, deviceId, lastSeen: Date.now() };
+  agents.set(lane, agent);
+  return agent;
+}
+
+/** The other occupied lane, if a second device has registered. */
+function peerOf(id: string): Agent | null {
+  for (const agent of agents.values()) if (agent.id !== id) return agent;
+  return null;
+}
 
 interface LogEvent {
   at: string;
@@ -120,19 +177,60 @@ app.get('/agent-card', (_req: Request, res: Response) => {
   });
 });
 
-/** Inbound call from the outside world. Blocks until the phone answers. */
+/**
+ * A device claims a lane and learns who it is talking to. Polled until a peer
+ * shows up, so the two apps pair themselves with no addresses typed by hand.
+ */
+app.post('/register', (req: Request, res: Response) => {
+  const deviceId = typeof req.body?.deviceId === 'string' ? req.body.deviceId : '';
+  const name = typeof req.body?.name === 'string' && req.body.name ? req.body.name : 'unnamed device';
+
+  if (!deviceId) {
+    res.status(400).json({ error: 'body must include a "deviceId" string' });
+    return;
+  }
+
+  const known = [...agents.values()].some((a) => a.deviceId === deviceId);
+  const agent = registerAgent(deviceId, name);
+  const peer = peerOf(agent.id);
+
+  if (!known) {
+    log('AGENT REGISTERED', `"${name}" took lane ${agent.id}`, agent.id);
+  }
+
+  res.json({
+    agentId: agent.id,
+    name: agent.name,
+    peerId: peer?.id ?? null,
+    peerName: peer?.name ?? null,
+  });
+});
+
+/** Inbound call. Blocks until the addressed device answers. */
 app.post('/run', async (req: Request, res: Response) => {
   const message = typeof req.body?.message === 'string' ? req.body.message : '';
   const from = typeof req.body?.from === 'string' && req.body.from ? req.body.from : 'anonymous';
+  // Default to the first registered lane so plain curl still works.
+  const to = typeof req.body?.to === 'string' && req.body.to
+    ? req.body.to
+    : (agents.keys().next().value ?? 'a');
 
   if (!message.trim()) {
     res.status(400).json({ error: 'body must include a non-empty "message" string' });
     return;
   }
 
-  const call: Call = { id: randomUUID(), message, from, status: 'queued', receivedAt: Date.now() };
+  const call: Call = {
+    id: randomUUID(),
+    message,
+    from,
+    to,
+    status: 'queued',
+    receivedAt: Date.now(),
+  };
   calls.push(call);
-  log('CALL RECEIVED', `from ${from}: "${preview(message)}"`, call.id);
+  const toName = agents.get(to)?.name ?? to;
+  log('CALL RECEIVED', `${from} → ${toName}: "${preview(message)}"`, call.id);
 
   const reply = await new Promise<string | null>((resolve) => {
     const timer = setTimeout(() => {
@@ -171,15 +269,27 @@ app.post('/run', async (req: Request, res: Response) => {
   res.json({ id: call.id, reply });
 });
 
-/** The phone polls this. Hands out each queued call exactly once. */
-app.get('/inbox', (_req: Request, res: Response) => {
-  const next = calls.find((c) => c.status === 'queued');
+/**
+ * A device polls its own lane. Hands out each queued call exactly once, and
+ * only to the agent it was addressed to -- without the lane filter two devices
+ * polling the same relay would steal each other's messages.
+ */
+app.get('/inbox', (req: Request, res: Response) => {
+  const agentId = typeof req.query.agent === 'string' ? req.query.agent : '';
+  if (agentId) {
+    const agent = agents.get(agentId);
+    if (agent) agent.lastSeen = Date.now();
+  }
+
+  const next = calls.find(
+    (c) => c.status === 'queued' && (!agentId || c.to === agentId),
+  );
   if (!next) {
     res.sendStatus(204);
     return;
   }
   next.status = 'in-flight';
-  log('HANDED TO DEVICE', `"${preview(next.message)}"`, next.id);
+  log('HANDED TO DEVICE', `lane ${next.to}: "${preview(next.message)}"`, next.id);
   res.json({ id: next.id, message: next.message, from: next.from });
 });
 

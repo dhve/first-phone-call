@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MODEL } from './config';
-import { DEFAULT_RELAY } from './relayConfig';
+import { DEFAULT_RELAY_URL } from './relayConfig';
 import { useAgent, type UIMessage } from './useAgent';
 import { callPeerAgent, usePhoneInbox } from './usePhoneInbox';
 
@@ -32,19 +32,21 @@ export function DeviceAgentApp() {
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList<UIMessage>>(null);
 
-  // Relay wiring. Editable at runtime: each device polls its own mailbox and
-  // calls the other's, and these addresses change whenever the network does.
-  const [myRelay, setMyRelay] = useState(DEFAULT_RELAY.mine);
-  const [peerRelay, setPeerRelay] = useState(DEFAULT_RELAY.peer);
+  // Only the relay address is configured; lanes and peer are auto-assigned.
+  // It stays editable because LAN addresses move with the network.
+  const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY_URL);
   const [showRelay, setShowRelay] = useState(false);
   const [calling, setCalling] = useState(false);
 
   const inbox = usePhoneInbox({
-    relayUrl: myRelay,
+    relayUrl,
     enabled: idle,
     answer: answerRemote,
     onEvent: (line) => appendLine('tool', line),
   });
+
+  const peerId = inbox.pairing?.peerId ?? null;
+  const canCall = status === 'ready' && !calling && !!peerId;
 
   useEffect(() => {
     listRef.current?.scrollToEnd({ animated: true });
@@ -52,17 +54,18 @@ export function DeviceAgentApp() {
 
   const ready = status === 'ready' || status === 'thinking';
 
-  /** Place an outbound call to the other agent and show its reply. */
+  /** Place an outbound call to the paired agent and show its reply. */
   const onCallPeer = async () => {
     const text = input.trim();
-    if (!text || calling) return;
+    if (!text || calling || !peerId || !inbox.pairing) return;
     setInput('');
     setCalling(true);
-    appendLine('user', `📱 → other agent: ${text}`);
+    appendLine('user', `📱 → ${inbox.pairing.peerName ?? 'other agent'}: ${text}`);
     const res = await callPeerAgent({
-      peerUrl: peerRelay,
+      relayUrl,
+      peerId,
       message: text,
-      from: DEFAULT_RELAY.from,
+      from: `agent-${inbox.pairing.agentId}`,
     });
     if (res.ok) {
       appendLine('assistant', `📞 other agent: ${res.reply}`);
@@ -99,24 +102,24 @@ export function DeviceAgentApp() {
 
       {ready && showRelay && (
         <View style={styles.relayPanel}>
-          <Text style={styles.relayLabel}>My mailbox (this device polls it)</Text>
+          <Text style={styles.relayLabel}>Relay address</Text>
           <TextInput
             style={styles.relayInput}
-            value={myRelay}
-            onChangeText={setMyRelay}
+            value={relayUrl}
+            onChangeText={setRelayUrl}
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <Text style={styles.relayLabel}>Other agent's mailbox (calls go here)</Text>
-          <TextInput
-            style={styles.relayInput}
-            value={peerRelay}
-            onChangeText={setPeerRelay}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          <Text style={styles.relayLabel}>
+            {inbox.pairing
+              ? `I am agent "${inbox.pairing.agentId}"` +
+                (inbox.pairing.peerId
+                  ? ` · paired with "${inbox.pairing.peerId}"`
+                  : ' · waiting for the other device…')
+              : 'registering…'}
+          </Text>
           {inbox.lastError && (
-            <Text style={styles.relayError}>inbox error: {inbox.lastError}</Text>
+            <Text style={styles.relayError}>relay error: {inbox.lastError}</Text>
           )}
         </View>
       )}
@@ -148,9 +151,9 @@ export function DeviceAgentApp() {
               multiline
             />
             <Pressable
-              style={[styles.callBtn, (status !== 'ready' || calling) && styles.sendBtnDisabled]}
+              style={[styles.callBtn, !canCall && styles.sendBtnDisabled]}
               onPress={onCallPeer}
-              disabled={status !== 'ready' || calling}
+              disabled={!canCall}
             >
               {calling ? (
                 <ActivityIndicator color="#fff" />
@@ -257,10 +260,11 @@ function Hint() {
 function inboxLabel(status: string, answered: number): string {
   const n = answered > 0 ? ` (${answered})` : '';
   switch (status) {
+    case 'pairing': return 'waiting for the other device…';
     case 'listening': return `listening${n}`;
     case 'answering': return 'answering a call…';
-    case 'error': return 'inbox unreachable';
-    default: return 'inbox off';
+    case 'error': return 'relay unreachable';
+    default: return 'offline';
   }
 }
 

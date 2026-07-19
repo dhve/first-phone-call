@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { INBOX_POLL_MS } from './relayConfig';
+import { Platform } from 'react-native';
+import { INBOX_POLL_MS, PAIR_POLL_MS } from './relayConfig';
 
-export type InboxStatus = 'off' | 'listening' | 'answering' | 'error';
+export type InboxStatus = 'off' | 'pairing' | 'listening' | 'answering' | 'error';
+
+export interface Pairing {
+  /** Lane this device holds on the relay. */
+  agentId: string;
+  /** Lane the other device holds, once it has registered. */
+  peerId: string | null;
+  peerName: string | null;
+}
 
 export interface InboxOptions {
-  /** Base URL of THIS device's mailbox, e.g. http://10.0.0.5:8787 */
+  /** Relay base URL, e.g. http://10.0.0.5:8787 */
   relayUrl: string;
-  /** Only poll when the model is loaded and idle. */
+  /** Only run when the model is loaded and idle. */
   enabled: boolean;
-  /** Runs the incoming message through the local model. */
+  /** Runs an incoming message through the local model. */
   answer: (message: string, from: string) => Promise<string>;
-  /** Surface activity in the UI (incoming call, reply sent, errors). */
+  /** Surface activity in the UI. */
   onEvent?: (line: string) => void;
 }
 
@@ -21,8 +30,16 @@ interface InboxItem {
 }
 
 /**
- * Polls this device's relay mailbox, answers each incoming message with the
- * on-device model, and posts the reply back.
+ * A per-install identity. Re-registering with the same value reclaims the same
+ * lane, so hot-reloading the app doesn't consume the second slot and strand
+ * the real peer. Module scope (not per-render) so it survives re-mounts.
+ */
+const DEVICE_ID = `${Platform.OS}-${Math.random().toString(36).slice(2, 10)}`;
+const DEVICE_NAME = Platform.OS === 'android' ? 'Android agent' : 'Device agent';
+
+/**
+ * Registers this device with the relay, then polls its own lane, answers each
+ * incoming message with the on-device model, and posts the reply back.
  *
  * Polling pauses while a request is in flight: inference occupies the single
  * llama context, so overlapping runs would contend for it. The relay hands out
@@ -31,17 +48,15 @@ interface InboxItem {
 export function usePhoneInbox(options: InboxOptions) {
   const { relayUrl, enabled, answer, onEvent } = options;
   const [status, setStatus] = useState<InboxStatus>('off');
+  const [pairing, setPairing] = useState<Pairing | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [answered, setAnswered] = useState(0);
 
-  // Keep callbacks in refs so the poll loop isn't torn down on every render.
+  // Refs so the loop isn't torn down and restarted on every render.
   const answerRef = useRef(answer);
   const onEventRef = useRef(onEvent);
   answerRef.current = answer;
   onEventRef.current = onEvent;
-
-  /** Guards against a second loop starting, and stops the loop on unmount. */
-  const runningRef = useRef(false);
 
   const emit = useCallback((line: string) => onEventRef.current?.(line), []);
 
@@ -52,26 +67,60 @@ export function usePhoneInbox(options: InboxOptions) {
     }
 
     let cancelled = false;
-    runningRef.current = true;
-    setStatus('listening');
-
     const base = relayUrl.replace(/\/+$/, '');
+    let announcedPeer: string | null = null;
+
+    /** Claim a lane and learn the peer's. Returns null if the relay is down. */
+    const register = async (): Promise<Pairing | null> => {
+      try {
+        const res = await fetch(`${base}/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deviceId: DEVICE_ID, name: DEVICE_NAME }),
+        });
+        if (!res.ok) throw new Error(`register returned ${res.status}`);
+        const body = (await res.json()) as Pairing;
+        setPairing(body);
+        setLastError(null);
+        if (body.peerId && body.peerId !== announcedPeer) {
+          announcedPeer = body.peerId;
+          emit(`🤝 paired with ${body.peerName ?? body.peerId}`);
+        }
+        return body;
+      } catch (e) {
+        setLastError((e as Error).message);
+        return null;
+      }
+    };
 
     const loop = async () => {
+      setStatus('pairing');
+
+      // Keep re-registering until a peer appears; also refreshes lastSeen so
+      // this device's lane isn't reclaimed while it waits.
+      let me = await register();
+      while (!cancelled && (!me || !me.peerId)) {
+        setStatus(me ? 'pairing' : 'error');
+        await sleep(PAIR_POLL_MS);
+        if (cancelled) return;
+        me = await register();
+      }
+      if (cancelled || !me) return;
+
+      setStatus('listening');
+
       while (!cancelled) {
         try {
-          const res = await fetch(`${base}/inbox`);
+          const res = await fetch(`${base}/inbox?agent=${encodeURIComponent(me.agentId)}`);
 
-          // 204 = nothing waiting. Sleep, then poll again.
           if (res.status === 204) {
             setStatus('listening');
             await sleep(INBOX_POLL_MS);
+            // Cheap keepalive + peer refresh; the relay uses it for liveness.
+            void register();
             continue;
           }
-
-          if (!res.ok) {
-            throw new Error(`inbox returned ${res.status}`);
-          }
+          if (!res.ok) throw new Error(`inbox returned ${res.status}`);
 
           const item = (await res.json()) as InboxItem;
           if (cancelled) return;
@@ -106,7 +155,6 @@ export function usePhoneInbox(options: InboxOptions) {
           setLastError(msg);
           setStatus('error');
           emit(`⚠️  inbox: ${msg}`);
-          // Back off a little so a down relay doesn't spin the loop.
           await sleep(INBOX_POLL_MS * 3);
           if (!cancelled) setStatus('listening');
         }
@@ -114,14 +162,12 @@ export function usePhoneInbox(options: InboxOptions) {
     };
 
     loop();
-
     return () => {
       cancelled = true;
-      runningRef.current = false;
     };
   }, [enabled, relayUrl, emit]);
 
-  return { status, lastError, answered };
+  return { status, pairing, lastError, answered };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -129,29 +175,27 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Place an outbound call to another agent's mailbox and wait for its reply.
- * The relay long-polls, so this resolves only once the far device has answered
- * (or the relay gives up and returns 504).
+ * Call the paired agent and wait for its reply. The relay long-polls, so this
+ * resolves only once the far device has answered (or the relay gives up).
  */
 export async function callPeerAgent(args: {
-  peerUrl: string;
+  relayUrl: string;
+  peerId: string;
   message: string;
   from: string;
 }): Promise<{ ok: true; reply: string } | { ok: false; error: string }> {
-  const base = args.peerUrl.replace(/\/+$/, '');
+  const base = args.relayUrl.replace(/\/+$/, '');
   try {
     const res = await fetch(`${base}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: args.message, from: args.from }),
+      body: JSON.stringify({ message: args.message, from: args.from, to: args.peerId }),
     });
 
     if (res.status === 504) {
       return { ok: false, error: 'timed out — the other agent did not reply in time' };
     }
-    if (!res.ok) {
-      return { ok: false, error: `relay returned ${res.status}` };
-    }
+    if (!res.ok) return { ok: false, error: `relay returned ${res.status}` };
 
     const body = (await res.json()) as { id: string; reply?: string };
     if (typeof body.reply !== 'string') {
